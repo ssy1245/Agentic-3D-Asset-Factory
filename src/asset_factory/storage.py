@@ -27,7 +27,8 @@ class Store:
                     status TEXT NOT NULL, data TEXT NOT NULL,
                     UNIQUE(project_id, request_id));
                 DROP INDEX IF EXISTS one_active_operation;
-                CREATE UNIQUE INDEX IF NOT EXISTS one_active_operation_per_stage ON operations(project_id, json_extract(data, '$.stage'))
+                DROP INDEX IF EXISTS one_active_operation_per_stage;
+                CREATE UNIQUE INDEX IF NOT EXISTS one_active_operation_per_stage_and_texture ON operations(project_id, json_extract(data, '$.stage'), coalesce(json_extract(data, '$.texture'), 0))
                 WHERE status IN ('queued','running','unknown');
             """)
 

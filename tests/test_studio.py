@@ -540,6 +540,35 @@ def test_visual_review_schema_and_image_inputs():
     assert result["verdict"] == "needs_review" and result["human_review_required"]
 
 
+def test_paused_geometry_keeps_image_workflow_and_blocks_paid_submission(tmp_path):
+    tripo = FakeTripo()
+    with TestClient(create_app(tmp_path, {"demo": FakeProvider()}, tripo=tripo)) as c:
+        pid = project(c)
+        store = c.app.state.store
+        with store.connect() as db:
+            p = store.get(pid, db)
+            p["geometry_paused"] = True
+            store.put(db, p)
+        for stage in ("design", "turnaround", "head", "body", "hair"):
+            assert submit(c, pid, stage).status_code == 202
+            approve(c, pid, stage)
+        p = finished(c, pid)
+        assert not any(o.get("kind") == "geometry" for o in p["operations"])
+        refs = {part: p["current"][part] for part in ("head", "body", "hair")}
+        assert (
+            c.post(f"/api/projects/{pid}/generate-models", json={"component_revisions": refs}).status_code
+            == 409
+        )
+        assert (
+            c.post(
+                f"/api/projects/{pid}/geometry",
+                json={"stage": "head", "source_revision": refs["head"], "request_id": "paused-test"},
+            ).status_code
+            == 409
+        )
+        assert tripo.submissions == 0
+
+
 class FakeTripo:
     model = "test-tripo"
 
@@ -605,6 +634,61 @@ def test_geometry_zero_balance_never_submits(tmp_path):
         assert response.status_code == 402
         assert not c.get(f"/api/projects/{pid}").json()["operations"]
         assert tripo.submissions == 0
+
+
+@pytest.mark.parametrize("face_limit", [5000, 20000])
+def test_tripo_p2_v3_contract_without_paid_calls(tmp_path, face_limit):
+    from asset_factory.tripo import TripoProvider
+
+    submitted = []
+
+    def handler(req):
+        assert req.url.host == "openapi.tripo3d.ai"
+        assert req.headers["authorization"] == "Bearer fake-key"
+        if req.url.path == "/v3/account/balance":
+            data = {"balance": 100, "frozen": 0}
+        elif req.url.path == "/v3/files":
+            data = {"file_token": "uploaded-token"}
+        elif req.url.path.startswith("/v3/generation/"):
+            payload = json.loads(req.content)
+            assert payload["model"] == "P2-20260801"
+            assert payload["quad"] is True
+            assert payload["face_limit"] == face_limit
+            assert not payload["texture"] and not payload["pbr"] and not payload["export_uv"]
+            assert (
+                not {"type", "model_version", "smart_low_poly", "geometry_quality", "files", "file"}
+                & payload.keys()
+            )
+            if req.url.path.endswith("multiview-to-model"):
+                assert payload["inputs"] == [{v: f"{v}-token"} for v in ("front", "left", "back", "right")]
+            else:
+                assert payload["input"] == "uploaded-token"
+            submitted.append(payload)
+            data = {"task_id": "task_p2"}
+        elif req.url.path == "/v3/tasks/task_p2":
+            data = {
+                "status": "success",
+                "credits_consumed": 25,
+                "output": {"model_url": "https://cdn.tripo3d.ai/model.fbx"},
+            }
+        else:
+            pytest.fail(str(req.url))
+        return httpx.Response(200, json={"code": 0, "data": data})
+
+    p = TripoProvider("fake-key", model="P2-20260801", transport=httpx.MockTransport(handler))
+    assert asyncio.run(p.balance())["balance"] == 100
+    assert asyncio.run(p.upload(png())) == "uploaded-token"
+    assert (
+        asyncio.run(
+            p.submit([f"{v}-token" for v in ("front", "left", "back", "right")], face_limit=face_limit)
+        )
+        == "task_p2"
+    )
+    assert asyncio.run(p.submit("uploaded-token", face_limit=face_limit)) == "task_p2"
+    assert asyncio.run(p.task("task_p2"))["credits_consumed"] == 25
+    assert len(submitted) == 2
+    with pytest.raises(ValueError):
+        asyncio.run(p.submit("uploaded-token", face_limit=50000))
 
 
 def test_tripo_http_contract_without_paid_calls(tmp_path):
@@ -803,11 +887,14 @@ def test_model_preview_approval_and_blender_export(tmp_path):
         assert c.get(base + "/preview").content == glb
         assert c.get(base + "/preview").headers["content-type"] == "model/gltf-binary"
         assert c.get(base + "/info").json()["meshes"] == 1
-        assert c.get(base + "/blender-package").status_code == 409
+        # Untextured, unapproved geometry can be exported without starting texturing.
+        with zipfile.ZipFile(io.BytesIO(c.get(base + "/blender-package").content)) as archive:
+            assert archive.read("test_head.glb") == glb
+        assert not finished(c, pid)["operations"][-1].get("visual_approved")
         assert c.post(base + "/approve", json={"checked": False}).status_code == 422
         assert c.post(base + "/approve", json={"checked": True}).json()["visual_approved"]
         with zipfile.ZipFile(io.BytesIO(c.get(base + "/blender-package").content)) as archive:
-            assert archive.read("head.glb") == glb
+            assert archive.read("test_head.glb") == glb
             assert json.loads(archive.read("manifest.json"))["models"][0]["source_revision"] == source
             assert "bpy.ops.import_scene.gltf" in archive.read("import_blender.py").decode()
         assert c.get(f"/api/projects/{other}/geometry/{op['id']}/preview").status_code == 404
@@ -933,7 +1020,7 @@ def test_fbx_without_blender_keeps_original_and_can_export(tmp_path, monkeypatch
         assert c.post(base + "/prepare-preview").json()["preview"]["status"] == "unavailable"
         assert c.post(base + "/approve", json={"checked": True}).status_code == 200
         with zipfile.ZipFile(io.BytesIO(c.get(base + "/blender-package").content)) as archive:
-            assert archive.read("head.fbx") == original
+            assert archive.read("test_head.fbx") == original
             assert "bpy.ops.import_scene.fbx" in archive.read("import_blender.py").decode()
 
 
@@ -995,3 +1082,171 @@ def test_reopen_approved_component_preserves_images_and_siblings(client):
     assert client.get(f"/api/projects/{pid}/images/{rid}").content == image
     approve(client, pid, "body")
     assert len(finished(client, pid)["operations"]) == len(before["operations"])
+
+
+def test_texture_approval_checkpoint_and_regeneration(tmp_path, monkeypatch):
+    class TextureTripo(FakeTripo):
+        is_p2 = True
+        model = "P2-20260801"
+        textures = 0
+        hold_texture = False
+
+        async def task(self, task_id):
+            while task_id == "texture-task" and self.hold_texture:
+                await asyncio.sleep(0.01)
+            return await super().task(task_id)
+
+        async def upload_model(self, path):
+            assert path.name.endswith("-texture-source.fbx")
+            assert path.read_bytes().startswith(b"; FBX")
+            return "copied-model-token"
+
+        async def texture(self, task_id, tokens):
+            assert task_id == "copied-model-token"
+            assert len(tokens) == 4
+            self.textures += 1
+            return "texture-task"
+
+    tripo = TextureTripo()
+    with TestClient(create_app(tmp_path, {"demo": FakeProvider()}, tripo=tripo)) as c:
+        pid = project(c)
+        for stage in ("design", "turnaround", "head", "body", "hair"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        p = finished(c, pid)
+        parent = next(o for o in p["operations"] if o.get("kind") == "geometry" and o["stage"] == "head")
+        old_bytes = (tmp_path / pid / (parent["id"] + ".fbx")).read_bytes()
+        regenerate = {
+            "stage": "head",
+            "source_revision": parent["request"]["source_revision"],
+            "regenerate_model_id": parent["id"],
+            "request_id": "regenerate-head-before-texture",
+        }
+        assert c.post(f"/api/projects/{pid}/geometry", json=regenerate).status_code == 202
+        finished(c, pid)
+        url = f"/api/projects/{pid}/geometry/{parent['id']}/texture"
+        assert c.post(url, json={}).status_code == 422
+        assert tripo.textures == 0
+        tripo.hold_texture = True
+        response = c.post(url, json={"checked": True})
+        assert response.status_code == 202
+        child = response.json()
+        regenerate["request_id"] = "regenerate-head-during-texture"
+        during = c.post(f"/api/projects/{pid}/geometry", json=regenerate)
+        assert during.status_code == 202
+        assert during.json()["id"] != parent["id"]
+        tripo.hold_texture = False
+        p = finished(c, pid)
+        updated = next(o for o in p["operations"] if o["id"] == parent["id"])
+        assert updated["visual_approved"] and updated["texture_committed"]
+        assert child["texture_resolution_target"] == 4096 and child["texture_quality"] == "detailed"
+        assert child["parent_model_id"] == parent["id"]
+        assert child["texture_input_mode"] == "uploaded_model_copy"
+        copied = tmp_path / pid / child["texture_source_file"]
+        assert copied.read_bytes() == old_bytes
+        assert copied.name != parent["id"] + ".fbx"
+        assert [v["view"] for v in child["input_views"]] == ["front", "left", "back", "right"]
+        assert c.post(url, json={"checked": True}).json()["id"] == child["id"]
+        assert tripo.textures == 1
+        assert (tmp_path / pid / (parent["id"] + ".fbx")).read_bytes() == old_bytes
+        regenerate["request_id"] = "regenerate-head-after-texture"
+        assert c.post(f"/api/projects/{pid}/geometry", json=regenerate).status_code == 202
+        p = finished(c, pid)
+        # Combine an unapproved textured head with untextured body/hair, without paid calls.
+        selected = {part: next(o["id"] for o in p["operations"] if o.get("kind") == "geometry" and o["stage"] == part and not o.get("texture")) for part in ("head", "body", "hair")}
+        selected["head"] = child["id"]
+        bundle_url = f"/api/projects/{pid}/character-blender-package"
+        bundle = c.get(bundle_url, params=selected)
+        assert bundle.status_code == 200 and tripo.textures == 1
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["output_name"] == "test"
+            assert [m["part"] for m in manifest["models"]] == ["head", "body", "hair"]
+            assert [m["textured"] for m in manifest["models"]] == [True, False, False]
+            for part, oid in selected.items():
+                assert archive.read("test_" + part + ".fbx") == (tmp_path / pid / (oid + ".fbx")).read_bytes()
+            assert "existing character" in archive.read("README.txt").decode()
+        async def fake_blend(models, destination, name):
+            assert name == "test"
+            assert [op["stage"] for op, _ in models] in (["head", "body", "hair"], ["head"])
+            destination.mkdir(parents=True, exist_ok=True)
+            path = destination / "fixture.blend"
+            path.write_bytes(b"BLENDER-v-test")
+            return path
+
+        monkeypatch.setattr("asset_factory.geometry.build_blend", fake_blend)
+        native_url = f"/api/projects/{pid}/project-blend"
+        native = c.get(native_url, params=selected)
+        assert native.status_code == 200 and native.content.startswith(b"BLENDER")
+        assert "test.blend" in native.headers["content-disposition"]
+        handoff = c.get(f"/api/projects/{pid}/project-package", params=selected)
+        assert handoff.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(handoff.content)) as archive:
+            assert archive.read("test.blend").startswith(b"BLENDER")
+            project_data = json.loads(archive.read("project.json"))
+            assert project_data["selected_models"] == selected
+            assert len([r for r in project_data["references"] if "revision_id" in r]) == 5
+            assert not any("history/" in n or "uploads/" in n for n in archive.namelist())
+            assert "current_revisions" not in project_data
+            for part, oid in selected.items():
+                op = next(o for o in p["operations"] if o["id"] == oid)
+                for view in op["input_views"]:
+                    assert archive.read(f"references/views/{part}/{view['view']}.png") == (tmp_path / pid / (view["input_id"] + ".png")).read_bytes()
+            assert "references/turnaround.png" in archive.namelist()
+            assert any(n.startswith("references/views/head/") and n.endswith("front.png") for n in archive.namelist())
+            assert "Continue with Codex" in archive.read("README.md").decode()
+
+        part = c.get(f"/api/projects/{pid}/geometry/{child['id']}/blend")
+        assert part.status_code == 200 and "test_head.blend" in part.headers["content-disposition"]
+        assert c.get(native_url, params={**selected, "head": selected["body"]}).status_code == 400
+        assert c.get(bundle_url, params={**selected, "head": selected["body"]}).status_code == 400
+        assert c.get(bundle_url, params={"head": child["id"]}).status_code == 422
+        other = project(c)
+        assert c.get(f"/api/projects/{other}/project-blend", params=selected).status_code == 404
+        assert c.get(f"/api/projects/{other}/character-blender-package", params=selected).status_code == 404
+        assert (
+            c.post(f"/api/projects/{pid}/geometry/{child['id']}/approve", json={"checked": True}).status_code
+            == 200
+        )
+        assert c.get(f"/api/projects/{pid}/geometry/{child['id']}/blender-package").status_code == 200
+        assert (
+            c.post(f"/api/projects/{pid}/geometry/{child['id']}/texture", json={"checked": True}).status_code
+            == 409
+        )
+
+
+def test_texture_v3_http_contract():
+    from asset_factory.tripo import TripoProvider
+
+    def handler(req):
+        assert str(req.url) == "https://openapi.tripo3d.ai/v3/models/texture"
+        p = json.loads(req.content)
+        assert p["input"] == "source-task"
+        assert p["model"] == "v3.5-20260815"
+        assert p["texture_quality"] == "detailed" and p["quad"] and p["pbr"]
+        assert p["texture_prompt"]["images"] == [
+            {"file_token": v} for v in ("front", "left", "back", "right")
+        ]
+        return httpx.Response(200, json={"code": 0, "data": {"task_id": "texture-task"}})
+
+    provider = TripoProvider("fake", "P2-20260801", httpx.MockTransport(handler))
+    assert asyncio.run(provider.texture("source-task", ["front", "left", "back", "right"])) == "texture-task"
+
+
+def test_texture_model_copy_upload_contract(tmp_path):
+    from asset_factory.tripo import TripoProvider
+
+    path = tmp_path / "candidate-texture-source.fbx"
+    content = b"; FBX 7.4.0 project file\n"
+    path.write_bytes(content)
+
+    def handler(req):
+        assert str(req.url) == "https://openapi.tripo3d.ai/v3/files"
+        assert content in req.content
+        assert b"candidate-texture-source.fbx" in req.content
+        assert req.headers["authorization"] == "Bearer fake"
+        return httpx.Response(200, json={"code": 0, "data": {"file_token": "copy-token"}})
+
+    p = TripoProvider("fake", "P2-20260801", httpx.MockTransport(handler))
+    assert asyncio.run(p.upload_model(path)) == "copy-token"
+    assert path.read_bytes() == content

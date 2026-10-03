@@ -94,7 +94,7 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
             os.getenv("TRIPO_API_KEY") or os.getenv("Tripo_AI_API_KEY") or os.getenv("TRIPO_AI_API_KEY")
         )
         if tripo_key:
-            tripo = TripoProvider(tripo_key, os.getenv("TRIPO_MODEL_VERSION", "v3.1-20260211"))
+            tripo = TripoProvider(tripo_key, os.getenv("TRIPO_MODEL_VERSION", "P2-20260801"))
     tasks = set()
 
     @asynccontextmanager
@@ -709,7 +709,13 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
             (source := revision(p, p["current"].get(part))) and source["approved"] and not source["stale"]
             for part in parts
         )
-        if newly_approved and r["stage"] in parts and all_ready and tripo is not None:
+        if (
+            newly_approved
+            and r["stage"] in parts
+            and all_ready
+            and tripo is not None
+            and not p.get("geometry_paused")
+        ):
             try:
                 p["model_submission"] = await submit_geometry_batch(
                     pid, {part: p["current"][part] for part in parts}

@@ -1,14 +1,19 @@
 import asyncio
+import hashlib
 import io
 import json
+import re
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+from .blender_export import build_blend
 from .model_preview import prepare_fbx_preview
 from .models import Region
 from .provider import ProviderError
@@ -20,6 +25,7 @@ class GeometryRequest(BaseModel):
     stage: Literal["head", "body", "hair"]
     source_revision: str
     crop: Region | None = None
+    regenerate_model_id: str | None = None
     request_id: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9-]+$")
 
 
@@ -58,10 +64,17 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
         op.update(
             vendor_status=vendor_status,
             progress=data.get("progress", 0),
-            consumed_credit=data.get("consumed_credit"),
+            consumed_credit=data.get("credits_consumed", data.get("consumed_credit")),
             checked_at=now(),
         )
         if vendor_status == "success":
+            if op.get("texture"):
+                output = data.get("output", {})
+                url = output.get("model_url") or output.get("base_model") or output.get("model")
+                if isinstance(url, dict):
+                    url = url.get("url")
+                if isinstance(url, str) and url.split("?")[0].lower().endswith(".glb"):
+                    op["model_format"] = "glb"
             path = store.root / op["project_id"] / (op["id"] + "." + op.get("model_format", "glb"))
             await tripo.download(data.get("output", {}), path)
             if op.get("model_format") == "fbx":
@@ -109,8 +122,21 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                 token = await tripo.upload(
                     (store.root / op["project_id"] / (op["input_id"] + ".png")).read_bytes()
                 )
+            if op.get("texture") and op.get("texture_source_file"):
+                model_input = await tripo.upload_model(
+                    store.root / op["project_id"] / op["texture_source_file"]
+                )
+                op["texture_source_token"] = model_input
+                persist(op)
+            else:
+                model_input = op.get("source_model_task_id")
             phase = "submit"
-            op["provider_task_id"] = await tripo.submit(token, face_limit=op["face_limit"], quad=op["quad"])
+            if op.get("texture"):
+                op["provider_task_id"] = await tripo.texture(model_input, token)
+            else:
+                op["provider_task_id"] = await tripo.submit(
+                    token, face_limit=op["face_limit"], quad=op["quad"]
+                )
             persist(op)  # Save the vendor ID before any polling/download.
             phase = "query"
             for _ in range(120):
@@ -147,6 +173,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             raise HTTPException(400, "Tripo 密钥未配置")
         # Recheck in transaction after the network check to handle concurrent submissions.
         with store.connect() as db:
+            if store.get(pid, db).get("geometry_paused"):
+                raise HTTPException(409, "3D 生成已暂停，正在核对 P2.0 接口。")
             existing = next((o for o in store.operations(pid, db) if o["request_id"] == req.request_id), None)
             if existing:
                 return existing
@@ -157,6 +185,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             with store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 p = store.get(pid, db)
+                if p.get("geometry_paused"):
+                    raise HTTPException(409, "3D 生成已暂停，正在核对 P2.0 接口。")
                 existing = next(
                     (o for o in store.operations(pid, db) if o["request_id"] == req.request_id), None
                 )
@@ -166,10 +196,19 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                     o for o in store.operations(pid, db) if o["status"] in ("queued", "running", "unknown")
                 ]
                 if any(
-                    o["status"] == "unknown" or o.get("kind") != "geometry" or o["stage"] == req.stage
+                    o["status"] == "unknown" or o.get("kind") != "geometry" or (o["stage"] == req.stage and not (req.regenerate_model_id and o.get("texture")))
                     for o in ongoing
                 ):
                     raise HTTPException(409, "请先处理当前操作")
+                if req.regenerate_model_id:
+                    parent, _ = ready_model(pid, req.regenerate_model_id, db)
+                    if (
+                        parent["stage"] != req.stage
+                        or parent["request"]["source_revision"] != req.source_revision
+                    ):
+                        raise HTTPException(409, "重新生成必须使用原白模的部件参考")
+                    if parent.get("texture"):
+                        raise HTTPException(409, "请从原白模重新生成，而不是贴图模型")
                 required_refs(p, req.stage)
                 source = revision(p, req.source_revision)
                 if (
@@ -257,6 +296,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             p = store.get(pid)
         except KeyError as error:
             raise HTTPException(404, "角色不存在") from error
+        if p.get("geometry_paused"):
+            raise HTTPException(409, "3D 生成已暂停，正在核对 P2.0 接口。")
         parts = ("head", "body", "hair")
         if set(component_revisions) != set(parts):
             raise HTTPException(400, "请先确认三个当前部件参考")
@@ -280,7 +321,7 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                     GeometryRequest(
                         stage=part,
                         source_revision=component_revisions[part],
-                        request_id=f"geometry-quadmv2-{component_revisions[part]}-{part}",
+                        request_id=f"geometry-{tripo.model}-quadmv2-{component_revisions[part]}-{part}",
                     ),
                 )
                 return {"stage": part, "operation": op}
@@ -353,12 +394,101 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
         if not source or source["stale"] or not source["approved"] or p["current"].get(op["stage"]) != rid:
             raise HTTPException(409, "模型参考已变更，请重新检查当前版本")
 
+    @app.post("/api/projects/{pid}/geometry/{oid}/texture", status_code=202)
+    async def generate_texture(pid: str, oid: str, req: GeometryApproval):
+        if tripo is None or not getattr(tripo, "is_p2", False):
+            raise HTTPException(400, "请先配置 P2.0 接口")
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            parent, parent_path = ready_model(pid, oid, db)
+            current_source(pid, parent, db)
+            if parent.get("texture"):
+                raise HTTPException(409, "此模型已经是贴图结果")
+            if store.get(pid, db).get("geometry_paused"):
+                raise HTTPException(409, "3D 生成已暂停")
+            existing = next((o for o in store.operations(pid, db) if o.get("parent_model_id") == oid), None)
+            if existing:
+                return existing
+            original_views = parent.get("input_views", [])
+            if len(original_views) != 4 or {v["view"] for v in original_views} != {
+                "front",
+                "left",
+                "back",
+                "right",
+            }:
+                raise HTTPException(400, "缺少原模型的四视图输入")
+            if any(
+                o["status"] in ("queued", "running", "unknown") and o["stage"] == parent["stage"]
+                for o in store.operations(pid, db)
+            ):
+                raise HTTPException(409, "请先处理当前操作")
+            op = {
+                k: parent[k]
+                for k in (
+                    "project_id",
+                    "stage",
+                    "provider",
+                    "model",
+                    "input_id",
+                    "input_views",
+                    "input_mode",
+                    "request",
+                    "face_limit",
+                    "quad",
+                )
+            }
+            op.update(
+                id=identity(),
+                request_id=f"texture-4k-{oid}",
+                kind="geometry",
+                status="queued",
+                created_at=now(),
+                progress=0,
+                texture=True,
+                pbr=True,
+                texture_quality="detailed",
+                texture_resolution_target=4096,
+                texture_model="v3.5-20260815",
+                model_format="fbx",
+                parent_model_id=oid,
+                source_model_task_id=parent["provider_task_id"],
+                provider_task_id=None,
+                error=None,
+            )
+            op["input_views"] = [
+                next(v for v in original_views if v["view"] == label).copy()
+                for label in ("front", "left", "back", "right")
+            ]
+            copy_path = parent_path.with_name(op["id"] + "-texture-source" + parent_path.suffix)
+            shutil.copy2(parent_path, copy_path)
+            op["texture_source_file"] = copy_path.name
+            op["texture_source_sha256"] = hashlib.sha256(copy_path.read_bytes()).hexdigest()
+            op["texture_input_mode"] = "uploaded_model_copy"
+            db.execute(
+                "INSERT INTO operations VALUES (?,?,?,?,?)",
+                (op["id"], pid, op["request_id"], op["status"], json.dumps(op)),
+            )
+            parent.update(
+                visual_approved=True,
+                visual_approved_at=now(),
+                texture_committed=True,
+                texture_operation_id=op["id"],
+                texture_confirmed_at=now(),
+            )
+            store.put_operation(db, parent)
+        task = asyncio.create_task(execute(op["id"]))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return op
+
     @app.get("/api/projects/{pid}/geometry/{oid}/preview")
     def preview(pid: str, oid: str):
         op, path = ready_model(pid, oid)
         if op.get("model_format") == "fbx":
             if op.get("preview", {}).get("status") != "ready":
-                return FileResponse(path, media_type="application/octet-stream", headers={"X-Model-Format": "fbx"})
+                return FileResponse(
+                    path, media_type="application/octet-stream", headers={"X-Model-Format": "fbx"}
+                )
             path = path.with_name(oid + "-preview.glb")
         return FileResponse(path, media_type="model/gltf-binary")
 
@@ -434,40 +564,149 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             store.put_operation(db, op)
         return op
 
-    @app.get("/api/projects/{pid}/geometry/{oid}/blender-package")
-    def blender_package(pid: str, oid: str):
-        op, path = ready_model(pid, oid)
-        current_source(pid, op)
-        if not op.get("visual_approved"):
-            raise HTTPException(409, "请先检查并确认模型")
+    def export_name(pid):
+        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', store.get(pid)["name"]).strip(" .")[:100].rstrip(" .")
+        name = name or "project"
+        if name.upper() in {"CON", "PRN", "AUX", "NUL", *[f"{prefix}{n}" for prefix in ("COM", "LPT") for n in range(1, 10)]}:
+            name = "_" + name
+        return name
+
+    def package_models(models, project_name, output_name):
         out = io.BytesIO()
-        name = op["stage"] + "." + op.get("model_format", "glb")
-        manifest = {
-            "schema_version": 1,
-            "models": [
-                {
-                    "path": name,
-                    "part": op["stage"],
-                    "operation_id": oid,
-                    "source_revision": op["request"]["source_revision"],
-                }
-            ],
-        }
+        manifest = {"schema_version": 1, "project_name": project_name, "output_name": output_name, "models": []}
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.write(path, name)
+            for op, path in models:
+                name = project_name + "_" + op["stage"] + "." + op.get("model_format", "glb")
+                archive.write(path, name)
+                manifest["models"].append({
+                    "path": name, "part": op["stage"], "operation_id": op["id"],
+                    "source_revision": op["request"]["source_revision"],
+                    "textured": bool(op.get("texture")),
+                })
             archive.writestr("manifest.json", json.dumps(manifest, indent=2))
             archive.write(
                 Path(__file__).resolve().parents[2] / "scripts" / "import_blender.py", "import_blender.py"
             )
-            archive.writestr(
-                "README.txt",
-                "Unzip this package. In Blender's Scripting workspace, open import_blender.py from the unzipped folder and run it, or run: blender --background --python import_blender.py\nThe script imports the model into a new collection in the current scene and saves a new file in this folder. It does not align, merge or rig the character.\n",
-            )
-        return Response(
-            out.getvalue(),
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{op["stage"]}-blender-{oid[:8]}.zip"'},
-        )
+            archive.writestr("README.txt",
+                "Blender import package (ZIP), not a ready-made .blend file.\n"
+                "Unzip first. For a new character, open a fresh Blender scene. To add to an existing character, open your .blend file first.\n"
+                "In the Scripting workspace, open import_blender.py from this folder and run it. "
+                "The models enter a new collection; existing objects remain. A new .blend copy is saved in this folder without overwriting your existing file.\n"
+                "Command-line alternative: blender --background --python import_blender.py\n"
+                "Parts retain their generated positions and scales. This does not align, merge or rig them.\n")
+        return Response(out.getvalue(), media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=blender-package.zip; filename*=UTF-8''{quote(output_name + '_blender.zip')}"})
+
+    @app.get("/api/projects/{pid}/geometry/{oid}/blender-package")
+    def blender_package(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        current_source(pid, op)
+        name = export_name(pid)
+        return package_models([(op, path)], name, name + "_" + op["stage"])
+
+    @app.get("/api/projects/{pid}/character-blender-package")
+    def character_blender_package(pid: str, head: str, body: str, hair: str):
+        models = []
+        with store.connect() as db:
+            db.execute("BEGIN")
+            for part, oid in (("head", head), ("body", body), ("hair", hair)):
+                op, path = ready_model(pid, oid, db)
+                if op["stage"] != part:
+                    raise HTTPException(400, "请选择对应的 Head、Body、Hair 模型")
+                current_source(pid, op, db)
+                models.append((op, path))
+        name = export_name(pid)
+        return package_models(models, name, name)
+
+    # Serialize local Blender exports; repeated requests reuse the saved result.
+    blend_export_lock = asyncio.Lock()
+
+    async def blend_response(pid, models, name):
+        async with blend_export_lock:
+            try:
+                path = await build_blend(models, store.root / pid / "blend-exports", export_name(pid))
+            except TimeoutError as error:
+                raise HTTPException(504, "Blender 导出超时，原模型保留，请重试。") from error
+            except (RuntimeError, OSError) as error:
+                raise HTTPException(503, str(error)) from error
+        return FileResponse(path, filename=name + ".blend", media_type="application/octet-stream")
+
+    @app.get("/api/projects/{pid}/geometry/{oid}/blend")
+    async def component_blend(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        current_source(pid, op)
+        return await blend_response(pid, [(op, path)], export_name(pid) + "_" + op["stage"])
+
+    @app.get("/api/projects/{pid}/project-blend")
+    async def project_blend(pid: str, head: str, body: str, hair: str):
+        models = []
+        with store.connect() as db:
+            db.execute("BEGIN")
+            for part, oid in (("head", head), ("body", body), ("hair", hair)):
+                op, path = ready_model(pid, oid, db)
+                if op["stage"] != part:
+                    raise HTTPException(400, "请选择对应的 Head、Body、Hair 模型")
+                current_source(pid, op, db)
+                models.append((op, path))
+        return await blend_response(pid, models, export_name(pid))
+
+    @app.get("/api/projects/{pid}/project-package")
+    async def project_package(pid: str, head: str, body: str, hair: str):
+        # Native export validates ownership, part mapping, readiness and current references.
+        scene = await project_blend(pid, head, body, hair)
+        p = store.get(pid)
+        name = export_name(pid)
+        selected = {"head": head, "body": body, "hair": hair}
+        sheets = {stage: p["current"][stage] for stage in ("design", "turnaround")}
+        inputs = {}
+        for part, oid in selected.items():
+            op, _ = ready_model(pid, oid)
+            current_source(pid, op)
+            sheets[part] = op["request"]["source_revision"]
+            inputs[part] = op.get("input_views", [])
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(scene.path, name + ".blend")
+            references = []
+            for stage, rid in sheets.items():
+                r = revision(p, rid)
+                if not r or not r["approved"] or r["stale"]:
+                    raise HTTPException(409, "所选模型的参考图已变更，请重新选择")
+                filename = f"references/{stage}.png"
+                archive.write(store.root / pid / (rid + ".png"), filename)
+                references.append({"path": filename, "stage": stage, "revision_id": rid})
+                # Component inputs are the exact immutable images submitted for this candidate.
+                views = inputs.get(stage) or r.get("views", [])
+                for view in views:
+                    asset_id = view.get("input_id") or view.get("id")
+                    filename = f"references/views/{stage}/{view['view']}.png"
+                    archive.write(store.root / pid / (asset_id + ".png"), filename)
+                    references.append({"path": filename, "asset_id": asset_id,
+                        "source_revision": rid, "view": view["view"], "part": stage})
+            archive.writestr("project.json", json.dumps({
+                "schema_version": 1, "project_name": p["name"], "brief": p.get("brief", ""),
+                "blend_file": name + ".blend", "selected_models": selected,
+                "selected_revisions": sheets, "references": references,
+                "assembly_status": "Parts imported; alignment, merging and rigging not performed.",
+            }, ensure_ascii=False, indent=2))
+            archive.writestr("README.md", (
+                f"# {p['name']}\n\nOpen `{name}.blend` directly in Blender. Textures are packed into the scene. "
+                "No import script is required.\n\n"
+                "## Reference files\n\n"
+                "- `references/`: selected overall design, turnaround and component sheets.\n"
+                "- `references/views/`: front/left/back/right images matching the selected candidates.\n"
+                "- `project.json`: selected model IDs and reference version metadata.\n\n"
+                "## Continue with Codex\n\n"
+                "Open this extracted folder as your Codex workspace. Ask Codex to read project.json, "
+                "the current reference sheets and the Blender scene before adjusting the character. "
+                "Use the selected references as the design baseline. "
+                "The three parts keep their generated positions and scales and still need alignment. "
+                "Head includes the neck shaft; Body includes shoulders and a short upper-neck allowance. "
+                "Hair is a separate component. No merging or rigging has been performed. "
+                "Save edits to a new .blend version so the exported baseline is retained.\n"
+            ))
+        return Response(out.getvalue(), media_type="application/zip", headers={
+            "Content-Disposition": f"attachment; filename=project.zip; filename*=UTF-8''{quote(name + '.zip')}"})
 
     @app.get("/api/projects/{pid}/geometry/{oid}/download")
     def download(pid: str, oid: str):
@@ -478,6 +717,6 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
         if op["project_id"] != pid or op.get("kind") != "geometry" or op["status"] != "succeeded":
             raise HTTPException(404, "模型尚未就绪")
         suffix = "." + op.get("model_format", "glb")
-        return FileResponse(store.root / pid / (oid + suffix), filename=op["stage"] + "-" + oid[:8] + suffix)
+        return FileResponse(store.root / pid / (oid + suffix), filename=export_name(pid) + "_" + op["stage"] + suffix)
 
     return submit_batch

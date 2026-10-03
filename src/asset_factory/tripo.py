@@ -15,6 +15,9 @@ class TripoProvider:
 
     def __init__(self, key, model="v3.1-20260211", transport=None):
         self.key, self.model, self.transport = key, model, transport
+        self.is_p2 = model == "P2-20260801"
+        if self.is_p2:
+            self.base = "https://openapi.tripo3d.ai/v3"
 
     async def request(self, method, path, **kwargs):
         try:
@@ -45,12 +48,14 @@ class TripoProvider:
             ) from error
 
     async def balance(self):
-        data = await self.request("GET", "/user/balance")
+        data = await self.request("GET", "/account/balance" if self.is_p2 else "/user/balance")
         return {"balance": data.get("balance", 0), "frozen": data.get("frozen", 0)}
 
     async def upload(self, png):
-        data = await self.request("POST", "/upload", files={"file": ("reference.png", png, "image/png")})
-        token = data.get("image_token")
+        data = await self.request(
+            "POST", "/files" if self.is_p2 else "/upload", files={"file": ("reference.png", png, "image/png")}
+        )
+        token = data.get("file_token" if self.is_p2 else "image_token")
         if not token:
             raise ProviderError("Tripo 上传未返回图片编号。")
         return token
@@ -60,33 +65,92 @@ class TripoProvider:
             raise ValueError("本项目只允许生成四边形模型，不能关闭 quad")
         if isinstance(token, list) and (len(token) != 4 or not all(token)):
             raise ValueError("多视图需要完整的 front、left、back、right 四张输入")
-        images = (
-            {"files": [{"type": "png", "file_token": t} for t in token]}
-            if isinstance(token, list)
-            else {"file": {"type": "png", "file_token": token}}
-        )
-        data = await self.request(
-            "POST",
-            "/task",
-            json={
-                "type": "multiview_to_model" if isinstance(token, list) else "image_to_model",
-                "model_version": self.model,
-                **images,
-                "texture": False,
-                "pbr": False,
-                "export_uv": False,
-                "face_limit": face_limit,
-                "quad": quad,
-                "smart_low_poly": False,
-            },
-        )
+        if self.is_p2:
+            if not 48 <= face_limit <= 25000:
+                raise ValueError("P2.0 四边形面数必须在 48–25,000 之间")
+            images = (
+                {
+                    "inputs": [
+                        {view: t} for view, t in zip(("front", "left", "back", "right"), token, strict=True)
+                    ]
+                }
+                if isinstance(token, list)
+                else {"input": token}
+            )
+            data = await self.request(
+                "POST",
+                "/generation/multiview-to-model" if isinstance(token, list) else "/generation/image-to-model",
+                json={
+                    "model": self.model,
+                    **images,
+                    "texture": False,
+                    "pbr": False,
+                    "export_uv": False,
+                    "face_limit": face_limit,
+                    "quad": True,
+                },
+            )
+        else:
+            images = (
+                {"files": [{"type": "png", "file_token": t} for t in token]}
+                if isinstance(token, list)
+                else {"file": {"type": "png", "file_token": token}}
+            )
+            data = await self.request(
+                "POST",
+                "/task",
+                json={
+                    "type": "multiview_to_model" if isinstance(token, list) else "image_to_model",
+                    "model_version": self.model,
+                    **images,
+                    "texture": False,
+                    "pbr": False,
+                    "export_uv": False,
+                    "face_limit": face_limit,
+                    "quad": quad,
+                    "smart_low_poly": False,
+                },
+            )
         task_id = data.get("task_id")
         if not task_id:
             raise ProviderError("Tripo 创建任务后未返回编号，请核对记录。", unknown=True)
         return task_id
 
+    async def upload_model(self, path):
+        if not self.is_p2:
+            raise ValueError("模型上传需要 v3 接口")
+        data = await self.request(
+            "POST", "/files", files={"file": (path.name, path.read_bytes(), "application/octet-stream")}
+        )
+        token = data.get("file_token")
+        if not token:
+            raise ProviderError("模型副本上传未返回文件编号。")
+        return token
+
+    async def texture(self, model_input, tokens):
+        if not self.is_p2:
+            raise ValueError("纹理生成需要 P2.0 的 v3 接口配置")
+        if len(tokens) != 4 or not all(tokens):
+            raise ValueError("纹理生成需要四张部件参考图")
+        data = await self.request(
+            "POST",
+            "/models/texture",
+            json={
+                "input": model_input,
+                "model": "v3.5-20260815",
+                "texture_prompt": {"images": [{"file_token": t} for t in tokens]},
+                "texture_quality": "detailed",
+                "pbr": True,
+                "texture_alignment": "original_image",
+                "quad": True,
+            },
+        )
+        if not data.get("task_id"):
+            raise ProviderError("纹理任务未返回编号，请核对记录。", unknown=True)
+        return data["task_id"]
+
     async def task(self, task_id):
-        return await self.request("GET", "/task/" + task_id)
+        return await self.request("GET", ("/tasks/" if self.is_p2 else "/task/") + task_id)
 
     async def download(self, output, path: Path):
         url = output.get("base_model") or output.get("model") or output.get("model_url")

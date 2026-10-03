@@ -21,9 +21,34 @@ const translations = {
 '视图之间没有清楚的空白带，请修改布局后重新生成或上传':'No clear gap between views. Adjust the layout and regenerate or upload a corrected sheet.','视图间空白过窄，请增加留白':'The gap between views is too narrow. Add more space.','至少一个视图为空，请检查四宫格布局':'At least one view is empty. Check the grid layout.','图片过小，无法可靠拆分四视图':'Image too small to split reliably.','请先完成四视图拆分并检查裁切预览':'Split the sheet and review the crops before approval.','只能确认当前有效版本':'Only the current valid version can be approved.','已有进行中或结果未知的操作，请先处理':'A request is running or its outcome is unknown. Resolve it first.','已达到本任务的出图次数上限':'This project has reached its generation attempt limit.','请填写修改意见':'Enter the requested changes.','任务不存在':'Project not found.','请先等待或核对当前出图操作':'Wait for or verify the current generation request.','请先等待当前操作完成':'Wait for the current operation to finish.',
 'API 密钥无效，请检查服务端配置。':'Invalid API key. Check the server configuration.','账号没有图片模型访问权限。':'This account cannot access the image model.','调用受限或余额不足，请检查账号。':'Rate limit or insufficient balance. Check your account.','图片请求参数或内容不被接受，请检查模型和输入。':'Image request rejected. Check the model and input.','图片服务返回错误，请核对调用记录。':'The image service returned an error. Check the request records.'
 };
-Object.assign(translations,{"操作不存在": "Operation not found.", "服务重启，未开始的操作已停止，可重新提交。": "The server restarted. Requests that had not started were stopped and can be resubmitted.", "服务在请求期间中断，结果及扣费未知。请先核对供应商记录。": "The server stopped during the request. The result and billing are unknown. Check the provider records first.", "只支持 PNG、JPEG、WebP": "Only PNG, JPEG and WebP are supported.", "图片不能超过两千万像素": "Images must not exceed 20 million pixels.", "图片文件无法读取": "Unable to read the image file.", "未取得可确认的图片结果，扣费可能已发生。请核对供应商记录后再继续。": "No confirmed image result was received. Charges may have occurred. Check the provider records before continuing.", "请选择四视图版本": "Select a four-view version.", "该出图服务尚未配置": "This image provider is not configured.", "图片不能超过 15 MB": "Images must not exceed 15 MB.", "参考图类型无效": "Invalid reference type.", "本地处理失败，原版本保留；请核对记录。": "Local processing failed. The original version was kept. Check the records.", "参考图片不存在或不属于当前角色": "Reference not found or does not belong to this character.", "生成模式与初始图片仅适用于整体设计": "Generation mode and source images apply only to overall design.", "文字生成模式不使用图片，请切换已有图像生成": "Text mode does not use images. Switch to image mode.", "请上传初始图片或选择当前整体设计": "Upload a source image or select the current overall design.", "只能选择一张初始图片": "Select only one source image.", "请先生成并显示初始图片，再进行框选修改": "Generate and display the source image before selecting an edit area.", "修改源版本不存在、步骤不匹配或已过期": "The source version is missing, belongs to another step or is outdated.", "请基于当前版本修改，避免历史版本分支混淆": "Edit the current version to avoid conflicting history branches.", "框选修改需要已有图片": "Selecting an edit area requires an existing image.", "圈画修改需要当前有效版本作为原图": "Annotations require the current valid image as their source.", "圈画修改意见.png": "Annotated changes.png", "请先等待或核对当前操作": "Wait for or verify the current operation.", "请先核对供应商记录": "Check the provider records first.", "操作状态不允许解除": "This operation cannot be resolved in its current state.", "图片不存在": "Image not found.", "三维几何试运行": "3D geometry trial", "先确认此部件，再用框选工具选中一个完整正面视图，避免把整张多视图当成一个模型。": "Approve this component, then select one complete front view. Do not submit the whole sheet as one object.", "读取 Tripo API 余额中…": "Loading Tripo API balance…", "生成一个无材质几何候选": "Generate one untextured geometry candidate", "下载 GLB 几何模型": "Download GLB geometry", "查询原任务": "Query original task", "三维几何": "3D geometry", "已提交一个无材质几何任务，不会自动生成材质。": "One untextured geometry task submitted. Textures will not be generated automatically."});
-Object.assign(translations,{"确认并生成三个部件": "Approve all views & generate components", "确认此部件": "Approve this component", "当前版本已确认。": "Current version approved.", "部件并行生成": "Parallel component generation", "生成／核对三个部件": "Generate / check three components", "AI 结构检查": "AI structure review", "检查只提供建议，请确认图片后继续。": "Review is advisory. Inspect the images before approval.", "AI 正在检查部件…": "AI is reviewing this component…", "正在检查结构分离、残留和颈部衔接，请稍候。": "Checking isolation, unwanted anatomy and neck interfaces. Please wait.", "AI 检查中": "AI review in progress", "生成中": "Generating", "未发现明显问题": "No obvious issues found", "需要人工检查": "Needs human review", "使用此修改建议": "Use this suggested change", "头部、身体和头发已并行提交，完成后会自动检查。": "Head, body and hair submitted in parallel. Each will be reviewed after generation.", "请先确认当前整体四视图": "Approve the current whole-character four views first."});
 Object.assign(translations,{
+ '项目包 · ZIP，包含可直接打开的 .blend、所选版本的参考图和 Codex 项目说明。解压即可使用。':'Project ZIP with a ready-to-open .blend, references for the selected versions and a Codex handoff guide. Extract and use.',
+ '正在导出 Blender 文件，请稍候…':'Exporting Blender file. Please wait…',
+ 'Blender 文件已导出。':'Blender file exported.',
+ '直接下载 Blender 文件（.blend），包含选中的三个部件与贴图；不自动对齐、拼接或绑定。':'Download a Blender file (.blend) with the three selected parts and packed textures. No automatic alignment, merging or rigging.',
+ '直接下载 Blender 文件（.blend），包含模型与贴图。贴图生成是可选步骤。':'Download a Blender file (.blend) with the model and packed textures. Texturing is optional.',
+
+ '当前浏览器不支持选择保存位置，将使用浏览器默认下载位置。支持此功能的浏览器中会弹出保存窗口。':'This browser cannot choose a save location and will use its default download location. Supported browsers show a Save dialog.',
+ '项目导出包已保存到所选位置。':'Project package saved to the selected location.',
+ '导出失败，请重试。':'Export failed. Please try again.',
+
+ '导出此部件':'Export component',
+ '导出项目':'Export project',
+ '贴图模型':'Textured model',
+ '白模':'White model',
+ '导出版本':'Export version',
+ '选择 Head、Body、Hair 的版本。默认优先使用贴图模型，没有贴图则使用白模。':'Choose Head, Body and Hair versions. Defaults to textured models when available, otherwise white models.',
+ 'Blender 导入包 · ZIP。可导入新场景或已有角色文件；不自动对齐、拼接或绑定。':'Blender import package · ZIP. Import into a new scene or an existing character file. No automatic alignment, merging or rigging.',
+ 'Blender 导入包 · ZIP。可导入新场景或已有角色文件；贴图生成是可选步骤。':'Blender import package · ZIP. Import into a new scene or an existing character file. Texturing is optional.',
+
+ '生成贴图':'Generate texture',
+ '贴图已提交':'Texture submitted',
+ '白模和贴图模型均可直接导出 Blender 文件包；贴图生成是可选步骤。':'White and textured models can both be exported to Blender. Texture generation is optional.',"操作不存在": "Operation not found.", "服务重启，未开始的操作已停止，可重新提交。": "The server restarted. Requests that had not started were stopped and can be resubmitted.", "服务在请求期间中断，结果及扣费未知。请先核对供应商记录。": "The server stopped during the request. The result and billing are unknown. Check the provider records first.", "只支持 PNG、JPEG、WebP": "Only PNG, JPEG and WebP are supported.", "图片不能超过两千万像素": "Images must not exceed 20 million pixels.", "图片文件无法读取": "Unable to read the image file.", "未取得可确认的图片结果，扣费可能已发生。请核对供应商记录后再继续。": "No confirmed image result was received. Charges may have occurred. Check the provider records before continuing.", "请选择四视图版本": "Select a four-view version.", "该出图服务尚未配置": "This image provider is not configured.", "图片不能超过 15 MB": "Images must not exceed 15 MB.", "参考图类型无效": "Invalid reference type.", "本地处理失败，原版本保留；请核对记录。": "Local processing failed. The original version was kept. Check the records.", "参考图片不存在或不属于当前角色": "Reference not found or does not belong to this character.", "生成模式与初始图片仅适用于整体设计": "Generation mode and source images apply only to overall design.", "文字生成模式不使用图片，请切换已有图像生成": "Text mode does not use images. Switch to image mode.", "请上传初始图片或选择当前整体设计": "Upload a source image or select the current overall design.", "只能选择一张初始图片": "Select only one source image.", "请先生成并显示初始图片，再进行框选修改": "Generate and display the source image before selecting an edit area.", "修改源版本不存在、步骤不匹配或已过期": "The source version is missing, belongs to another step or is outdated.", "请基于当前版本修改，避免历史版本分支混淆": "Edit the current version to avoid conflicting history branches.", "框选修改需要已有图片": "Selecting an edit area requires an existing image.", "圈画修改需要当前有效版本作为原图": "Annotations require the current valid image as their source.", "圈画修改意见.png": "Annotated changes.png", "请先等待或核对当前操作": "Wait for or verify the current operation.", "请先核对供应商记录": "Check the provider records first.", "操作状态不允许解除": "This operation cannot be resolved in its current state.", "图片不存在": "Image not found.", "三维几何试运行": "3D geometry trial", "先确认此部件，再用框选工具选中一个完整正面视图，避免把整张多视图当成一个模型。": "Approve this component, then select one complete front view. Do not submit the whole sheet as one object.", "读取 Tripo API 余额中…": "Loading Tripo API balance…", "生成一个无材质几何候选": "Generate one untextured geometry candidate", "下载 GLB 几何模型": "Download GLB geometry", "查询原任务": "Query original task", "三维几何": "3D geometry", "已提交一个无材质几何任务，不会自动生成材质。": "One untextured geometry task submitted. Textures will not be generated automatically."});
+Object.assign(translations,{"确认并生成三个部件": "Approve all views & generate components", "确认此部件": "Approve this component", "当前版本已确认。": "Current version approved.", "部件并行生成": "Parallel component generation", "生成／核对三个部件": "Generate / check three components", "AI 结构检查": "AI structure review", "检查只提供建议，请确认图片后继续。": "Review is advisory. Inspect the images before approval.", "AI 正在检查部件…": "AI is reviewing this component…", "正在检查结构分离、残留和颈部衔接，请稍候。": "Checking isolation, unwanted anatomy and neck interfaces. Please wait.", "AI 检查中": "AI review in progress", "生成中": "Generating", "未发现明显问题": "No obvious issues found", "需要人工检查": "Needs human review", "使用此修改建议": "Use this suggested change", "头部、身体和头发已并行提交，完成后会自动检查。": "Head, body and hair submitted in parallel. Each will be reviewed after generation.", "请先确认当前整体四视图": "Approve the current whole-character four views first."});
+Object.assign(translations,{'3D 生成已暂停，正在核对 P2.0 接口。':'3D generation paused while the P2.0 API is being verified.'});
+Object.assign(translations,{
+ '正在提交贴图生成任务…':'Submitting texture generation…',
+ '正在确认贴图模型…':'Approving textured model…',
  '并行部件':'Parallel components',
  '同时生成 · 各自检查与确认':'Generate together · Review separately',
  '部件已确认':'components approved',
@@ -122,6 +147,9 @@ Object.assign(translations, {'下载原始 FBX':'Download original FBX', '四视
 let uiLanguage=localStorage.getItem('studio-language')==='en'?'en':'zh';
 const originalText=new WeakMap(),originalAttributes=new WeakMap();
 function translateUI(text){
+ if(text.startsWith('项目文件名：'))return 'Project filename: '+text.slice('项目文件名：'.length);
+ if(/^(贴图模型|白模) · /.test(text))return text.replace(/^(贴图模型|白模)/,value=>translations[value]);
+ if(/ · 导出版本$/.test(text))return translateUI(text.replace(/ · 导出版本$/, ''))+' · Export version';
  if(/^3D 完成进度：\d+ \/ 3$/.test(text))return text.replace(/^3D 完成进度：(\d+) \/ 3$/,'3D models ready: $1 / 3');
  if(translations[text])return translations[text];
  if(text.includes('\n'))return text.split('\n').map(translateUI).join('\n');
@@ -158,6 +186,30 @@ function applyUILanguage(){
  document.documentElement.lang=uiLanguage==='en'?'en':'zh-CN';document.title=uiLanguage==='en'?'Reference Studio · Character Reference Studio':'Reference Studio · 角色参考工作室';
  document.getElementById('languageSwitch').value=uiLanguage;
 }
+Object.assign(translations,{
+ '双面显示':'Double-sided display',
+ '双面显示可查看发片背面；关闭可检查面朝向，不会修复缺面或修改原模型。':'Double-sided display reveals hair-card backs. Turn it off to inspect face orientation; it does not repair missing faces or modify the source model.',
+ '贴图生成中…':'Generating texture…',
+ '重新生成白模':'Regenerate white model',
+ '查看贴图结果':'View textured result',
+ '确认白模并生成贴图':'Approve model → Generate texture',
+ '已确认白模':'White model approved',
+ '最终确认贴图模型':'Final approve textured model',
+ '最终确认完成':'Final approval complete',
+ '确认白模并生成贴图？':'Approve model and generate texture?',
+ '确认后将提交付费纹理生成任务，无法撤回或取消已产生的 API 费用。此白模将锁定；系统会复制白模，在副本上生成贴图，原文件与历史版本仍会保留。':'This submits a paid texture task. Submission and incurred API charges cannot be reversed. This white model will be locked. Texturing uses an uploaded copy; the original and history are preserved.',
+ '使用该部件的 Front / Left / Back / Right 四视图作为贴图参考。贴图目标：4K · 高清质量 · PBR。完成后需要再次检查并最终确认。':'Uses this component’s Front / Left / Back / Right references. Texture target: 4K · Detailed quality · PBR. Inspect the result and give final approval afterward.',
+ '返回检查':'Back to review',
+ '确认并开始生成贴图':'Confirm & generate texture',
+ '贴图生成完成，请查看结果并最终确认。':'Texture ready. View the result and give final approval.',
+ '贴图任务状态待核对，请查询原任务。':'Texture task status uncertain. Query the original task.',
+ '贴图模型已最终确认，可下载或导出。':'Textured model approved. Download or export is available.',
+ '先检查白模；确认后生成贴图，再进行最终确认。':'Review the white model, approve to generate texture, then give final approval.',
+ '最终确认贴图后可下载或导出。':'Download or export after final texture approval.',
+ '下载贴图模型':'Download textured model',
+ '已提交新的白模候选，原模型保留。':'New white model candidate submitted. The original is preserved.',
+ '贴图目标：4K · detailed · 实际分辨率待核对':'Texture target: 4K · detailed · Actual resolution not yet verified'
+});
 const uiObserver=new MutationObserver(()=>{uiObserver.disconnect();applyUILanguage();observeUI();});
 function observeUI(){uiObserver.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['placeholder','aria-label','title','alt','data-hint']});}
 document.getElementById('languageSwitch').onchange=event=>{uiLanguage=event.target.value;localStorage.setItem('studio-language',uiLanguage);uiObserver.disconnect();applyUILanguage();observeUI();};

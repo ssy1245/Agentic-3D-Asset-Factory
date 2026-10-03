@@ -20,7 +20,7 @@ class MeshInspector extends HTMLElement {
   const rim=new THREE.DirectionalLight(0xa7cbff,1.4);rim.position.set(-4,2,-3);this.scene.add(rim);
   const generator=new THREE.PMREMGenerator(this.renderer),room=new RoomEnvironment();
   this.env=generator.fromScene(room);this.scene.environment=this.env.texture;room.dispose();generator.dispose();
-  this.mode='clay';this.meshes=[];this.serial=0;
+  this.mode='clay';this.doubleSided=true;this.meshes=[];this.serial=0;
   this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(this);this.resize();
   if(!this.hasAttribute('thumbnail'))this.renderer.setAnimationLoop(()=>{if(!this.hidden&&this.getClientRects().length){this.controls.update();this.renderer.render(this.scene,this.camera);}});
   if(this.getAttribute('src'))this.load(this.getAttribute('src'));
@@ -33,7 +33,13 @@ class MeshInspector extends HTMLElement {
  async load(url){
   const serial=++this.serial;this.clear();
   try{
-   const loaded=this.getAttribute('model-format')==='fbx'?await new FBXLoader().loadAsync(url):await new GLTFLoader().loadAsync(url);
+   const manager=new THREE.LoadingManager();
+   let texturesFailed=false;
+   const resourcesReady=new Promise(resolve=>{manager.onLoad=resolve;});
+   manager.onError=()=>{texturesFailed=true;};
+   const loaded=this.getAttribute('model-format')==='fbx'?await new FBXLoader(manager).loadAsync(url):await new GLTFLoader(manager).loadAsync(url);
+   await resourcesReady;
+   if(texturesFailed)throw new Error('Model texture failed to load');
    const gltf={scene:loaded.scene||loaded};
    if(serial!==this.serial){this.disposeModel(gltf.scene);return;}
    this.root=gltf.scene;this.scene.add(this.root);
@@ -54,7 +60,7 @@ class MeshInspector extends HTMLElement {
     this.meshes.push({mesh,original,clay,overlay});
    });
    for(const e of this.meshes)e.mesh.add(e.overlay);
-   this.setMode(this.mode);this.jumpCameraToGoal();this.resize();this.dispatchEvent(new Event('load'));
+   this.setDoubleSided(this.doubleSided);this.setMode(this.mode);this.jumpCameraToGoal();this.resize();this.dispatchEvent(new Event('load'));
   }catch(error){if(serial===this.serial){this.clear();this.dispatchEvent(new Event('error'));}}
  }
  setMode(mode){
@@ -63,6 +69,13 @@ class MeshInspector extends HTMLElement {
    e.mesh.material=mode==='material'?e.original:e.clay;
    e.clay.visible=mode!=='xray';e.overlay.visible=!!this.wireEnabled||mode==='xray';
    e.overlay.material.depthTest=mode!=='xray';e.overlay.material.color.set(mode==='xray'?0x80dcff:0x14202b);e.overlay.material.opacity=mode==='xray'?.28:.45;
+  }
+ }
+ setDoubleSided(enabled){
+  this.doubleSided=enabled;
+  const side=enabled?THREE.DoubleSide:THREE.FrontSide;
+  for(const e of this.meshes)for(const material of [e.clay,e.overlay.material,...[].concat(e.original)]){
+   material.side=side;material.needsUpdate=true;
   }
  }
  captureThumbnail(){this.resize();this.renderer.render(this.scene,this.camera);return this.renderer.domElement.toDataURL('image/jpeg',.86);}

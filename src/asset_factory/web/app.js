@@ -106,7 +106,7 @@ function render(){
   $('serviceStatus').textContent=`图片 API：${config?.providers.includes('openai')?'已配置':'未配置'}\n3D API：${config?.tripo_configured?'已配置':'未配置'}`;$('serviceStatus').style.whiteSpace='pre-line';
   $('projects').disabled=busy;$('newProject').disabled=busy;
   $('projectName').textContent=project?.name||'开始一个新角色';
-  $('stageTitle').textContent=labels[stage];$('stageDesc').textContent=descriptions[stage];
+  $('stageTitle').textContent=labels[stage];$('stageTitle').classList.toggle('model-stage-title',stage==='models');$('stageDesc').textContent=descriptions[stage];
   $('stageEyebrow').textContent=stage==='models'?'阶段 04 / 04':['head','body','hair'].includes(stage)?'阶段 03 / 04 · 并行部件':stage==='design'?'阶段 01 / 04':'阶段 02 / 04';
   renderWorkflow();
   $('imageWorkspace').hidden=stage==='models';

@@ -11,6 +11,7 @@ def blender_binary():
     candidates = [os.getenv("BLENDER_BINARY", ""), shutil.which("blender") or ""]
     for root in (Path("/Applications"), Path.home() / "Applications"):
         candidates.extend(str(p) for p in root.glob("*lender*.app/Contents/MacOS/Blender"))
+    candidates.extend(str(p) for p in (Path.home() / "Library/Application Support/Steam/steamapps/common").glob("*lender*/*.app/Contents/MacOS/Blender"))
     return next((p for p in candidates if p and Path(p).is_file()), None)
 
 

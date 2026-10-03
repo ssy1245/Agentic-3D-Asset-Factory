@@ -264,3 +264,75 @@ The current Head has visibly shallow eye and mouth detail in the clay preview; i
 The earlier/current comparison changes input mode, reference revision, polygon budget and topology simultaneously. It cannot isolate a multiview error. A controlled next experiment should hold the approved four PNGs, quad output and 5,000-face target fixed, changing one setting at a time. `geometry_quality=detailed` is a possible separate test, not a guaranteed fix; the documented surcharge is 20 credits. Do not silently increase the face target, disable quad output or regenerate an existing task.
 
 Parameter reference: https://docs.tripo3d.ai/model-generation/multiview-to-model-v3-0-v3-1.html
+
+### P2.0 integration — 2026-10-03
+
+The default studio engine is now `P2-20260801` (P2.0 Preview). The provider uses `https://openapi.tripo3d.ai/v3`, `/files` uploads returning `file_token`, `/generation/multiview-to-model` with explicit view-key `inputs`, `/tasks/{task_id}` polling, and `/account/balance`. Manual single-image crops use `/generation/image-to-model`. P2 requests send `model`, `quad=true`, `face_limit`, `texture=false`, `pbr=false` and `export_uv=false`; they omit legacy `type`, `model_version`, `smart_low_poly` and `geometry_quality` fields. Head remains 5,000 faces; Body/Hair remain 20,000, within the documented P2 quad limit of 25,000.
+
+Generation IDs include the model version, and current-batch matching also requires the configured model. Earlier model results remain historical and cannot silently fulfill a P2 batch. The engine version is visible in the model library. Legacy v3.1 provider behavior remains available for explicitly configured legacy installations.
+
+Validation: 39 tests passed, including v3 upload, explicit four-view mapping, single-image input, both component face targets, task query and P2 face-limit validation. The existing key successfully authenticated against the live v3 balance endpoint. No paid generation was submitted for this migration; model quality and the actual generated export still require a real P2 task.
+
+Official API reference: https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p
+
+
+### Geometry approval → texture checkpoint → final approval
+
+The model inspector now offers Regenerate white model for a completed geometry candidate, including after it has entered texturing. Regeneration uses the approved component reference revision and a durable client request ID; earlier candidates remain intact. Regeneration creates an independent white candidate, preserving the original and its texture task. One geometry task and one texture task may run for the same part concurrently; unresolved unknown tasks still block new generation.
+
+Clicking Approve white model and generate texture directly submits texturing without a second confirmation dialog. The action atomically records geometry approval, records the texture checkpoint and creates one durable texture operation. The button is disabled during submission and shows progress; the original model is preserved and the copy is textured. Repeated confirmation returns the same operation; failed/unknown requests are not automatically resubmitted. The original geometry remains preserved. The texture request reuses its generation task ID and uploads the four immutable reference snapshots in front/left/back/right order.
+
+Texturing uses `/v3/models/texture`, model `v3.5-20260815`, `texture_quality=detailed`, PBR enabled, original-image alignment and quad output requested. The UI states a 4K target; current API documentation exposes quality tiers rather than an explicit 4096-pixel parameter. Actual resolution has not been established by an end-to-end paid run. Do not describe the requested target as a measured output resolution.
+
+Completed texture candidates open in original-material display mode and offer separate final approval for recording review. Export is available for both white and textured models without this approval. The original quad FBX remains authoritative for geometry if a texture result is returned as GLB; browser wireframes and GLB export do not certify quad topology. Local-file preview does not offer paid generation controls.
+
+Validation: 41 tests passed, including the texture HTTP contract, explicit confirmation requirement, original-file preservation, regeneration before/after the checkpoint, idempotent texture submission and final approval/export. No real texture or regeneration task was submitted during this implementation.
+
+
+### Texturing an independent white-model copy
+
+New texture submissions copy the selected original model to a separate `-texture-source` file before starting the worker. Its SHA-256 is recorded. The worker uploads that model copy through `/v3/files` and sends its file token as the texture API `input`, rather than texturing via the original generation task ID. The original geometry and the returned textured output have separate paths and operation records. Historical in-flight texture tasks without this new field retain their original task-ID behavior and are not resubmitted.
+
+The four immutable reference snapshots from the selected white model are uploaded again, explicitly ordered front/left/back/right, and passed as `texture_prompt.images` using file tokens. The whole four-panel sheet is not used as a single texture reference. Tests verify a separate model copy with identical bytes, preserved original, uploaded-model input, and all four ordered references. No paid texture task was submitted for this change.
+
+### Hair preview and backface culling
+
+The live P2 Hair candidate showed large disappearing patches when viewed from the front. A same-file, same-camera comparison confirmed that these patches reappear with double-sided rendering. The inspector and thumbnails now default to double-sided display; an inspector checkbox allows a single-sided comparison. This applies to clay, original-material and wireframe preview materials only, without rewriting the source FBX. It does not establish whether the source uses intentional thin hair cards or reversed face orientation, nor does it repair missing geometry or normals. The browser comparison and JavaScript syntax checks passed; no paid generation was needed.
+
+### Optional texturing and direct Blender export
+
+The white-model action is labeled Generate texture. Texturing is optional: any completed model using the current approved component references can be downloaded or exported as a Blender package without visual approval or a texture task. Final texture approval remains available for recording review, but does not gate export. Existing ownership, source-revision and file-readiness checks remain in place.
+
+### Component and character import packages
+
+The inspector action is Export component. The model overview offers Export project with explicit Head/Body/Hair version selectors, defaulting to the latest completed current textured candidate for each part, or the latest completed white candidate when none is available. A character package requires all three current parts; pending, failed, stale and other-project candidates cannot be exported through it. Texturing and visual approval are optional.
+
+Both downloads are clearly labeled Blender import package · ZIP. They contain model files, a manifest and import_blender.py. Run the script in a fresh Blender scene, or open an existing character .blend first and run it there. Imported parts enter a new collection; the scene is saved as a new project-name_head/body/hair.blend or project-name.blend in the package folder, adding a numeric suffix if it already exists. Existing objects remain. The package does not perform alignment, merging or rigging. Actual Blender execution is not verified here because Blender is not installed locally.
+
+Export filenames derive from the project name (for example Jinx.blend and Jinx_body.blend). Packaged model files and raw downloads use project-name_part.fbx/glb. Unsafe filename characters are replaced; Unicode project names are retained using UTF-8 download headers.
+
+### Textured preview thumbnails
+
+Textured candidates now render their original materials in overview thumbnails; white candidates retain clay rendering. The viewer waits for the loader's model and texture resources before reporting load success or capturing the thumbnail. A live head texture FBX contains four embedded image payloads and displays colored materials in the inspector; the previous overview thumbnail always used clay shading. No regeneration or texture submission is needed for this display change.
+
+Export project opens the browser's native Save dialog through showSaveFilePicker when available, before fetching the ZIP. Canceling the dialog starts no export. Unsupported browsers use their regular download behavior and show a message about the default download location. The frontend cannot force a native Save dialog on browsers without this API.
+
+### Blender text-editor path repair and live import validation
+
+Blender may populate __file__ with a virtual <scene.blend>/<text-name> path. The exported script now checks the saved text path, the directory containing that virtual .blend path, and the current scene directory for manifest.json. If absent, it provides an explicit instruction to open the script from the unzipped package. Three regression checks cover saved-text, virtual-path and missing-manifest cases.
+
+The user's Steam Blender 5.2.2 successfully imported the live Jinx package and saved a new Jinx-1.blend without overwriting Jinx.blend. Reopening confirmed Head, Body and Hair meshes and twelve packed 4096×4096 texture images. This verifies this specific export; it does not guarantee 4K output for future vendor tasks. Original positions/scales and existing scene objects remain; no assembly or rigging was performed.
+
+### Native .blend export pipeline
+
+Export project and Export component now request native .blend endpoints. The backend validates selected saved candidates and current references, runs an isolated local Blender process with auto-execution disabled, imports into a clean scene, packs textures and saves the .blend. Files are cached by candidate IDs, source sizes/mtimes and project name. Local exports are serialized, time out after 180 seconds and preserve original assets. The browser offers a .blend save dialog where supported, shows export progress and handles failure without downloading an error page. Legacy ZIP routes remain available for compatibility. BLENDER_BINARY configures the backend runtime; discovery also supports the user's Steam installation. Clients do not need Blender installed to download the file.
+
+Live end-to-end verification: project-blend returned Jinx.blend (24,324,473 bytes) and the component endpoint returned Jinx_body.blend (11,523,500 bytes), both valid native Blender files. Blender 5.2.2 reopened the returned project file and confirmed exactly three imported meshes, no default cube, and twelve packed texture images. Saving explicitly disables compression so the backend can verify the native file header. This validation used only existing assets and incurred no generation fees.
+
+### Complete project handoff ZIP
+
+Export project now downloads project-name.zip containing the native project-name.blend with packed textures, all retained reference-sheet revisions, current reference sheets, view crops, uploaded references, a filtered project.json with local paths and selected candidate IDs, and a README for continuing in Codex. No import script is needed after extraction. Export component continues to download a standalone native .blend. The package contains no API keys or signed vendor download links.
+
+### Selected-reference export only
+
+The project ZIP now contains exactly the selected set: the approved overall design and turnaround, the Head/Body/Hair sheets associated with the selected model source revisions, and those candidates' immutable input-view snapshots (plus the selected overall turnaround crops). Historical sheets, unrelated uploaded feedback references and edit/review messages are excluded. project.json records only selected references and model IDs, not full project history. Tests compare exported component view bytes to the exact selected operation inputs.
