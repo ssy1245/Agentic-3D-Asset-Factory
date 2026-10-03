@@ -42,3 +42,6 @@ scripts/split_grid_test.py
 dist/
 build/
 *.egg-info/
+
+# Reinstall browser viewer dependencies with npm ci.
+node_modules/

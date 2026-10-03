@@ -1,11 +1,15 @@
 import asyncio
+import io
 import json
+import zipfile
+from pathlib import Path
 from typing import Literal
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+from .model_preview import prepare_fbx_preview
 from .models import Region
 from .provider import ProviderError
 from .storage import identity, now
@@ -15,8 +19,32 @@ from .tripo import crop_reference
 class GeometryRequest(BaseModel):
     stage: Literal["head", "body", "hair"]
     source_revision: str
-    crop: Region
+    crop: Region | None = None
     request_id: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9-]+$")
+
+
+class GeometryApproval(BaseModel):
+    checked: Literal[True]
+
+
+def model_info(path):
+    with path.open("rb") as file:
+        header = file.read(20)
+        if len(header) != 20 or header[:4] != b"glTF" or int.from_bytes(header[4:8], "little") != 2:
+            raise ValueError("模型文件不是有效的 GLB")
+        if int.from_bytes(header[8:12], "little") != path.stat().st_size or header[16:20] != b"JSON":
+            raise ValueError("模型文件不是有效的 GLB")
+        length = int.from_bytes(header[12:16], "little")
+        if length > 16 * 1024 * 1024 or length > path.stat().st_size - 20:
+            raise ValueError("模型文件不是有效的 GLB")
+        data = json.loads(file.read(length))
+    if not isinstance(data, dict) or not isinstance(data.get("meshes"), list) or not data["meshes"]:
+        raise ValueError("模型没有可检查的网格")
+    return {
+        "meshes": len(data["meshes"]),
+        "materials": len(data.get("materials", [])),
+        "bytes": path.stat().st_size,
+    }
 
 
 def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
@@ -34,8 +62,17 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             checked_at=now(),
         )
         if vendor_status == "success":
-            path = store.root / op["project_id"] / (op["id"] + ".glb")
+            path = store.root / op["project_id"] / (op["id"] + "." + op.get("model_format", "glb"))
             await tripo.download(data.get("output", {}), path)
+            if op.get("model_format") == "fbx":
+                persist(op)
+                try:
+                    op["preview"] = await prepare_fbx_preview(path)
+                except Exception:  # noqa: BLE001 — original download is preserved
+                    op["preview"] = {
+                        "status": "unavailable",
+                        "reason": "FBX 预览转换失败，原始四边形文件保留。",
+                    }
             op.update(
                 status="succeeded",
                 finished_at=now(),
@@ -60,11 +97,20 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             store.put_operation(db, op)
         phase = "upload"
         try:
-            token = await tripo.upload(
-                (store.root / op["project_id"] / (op["input_id"] + ".png")).read_bytes()
-            )
+            if op.get("input_views"):
+                token = []
+                for v in op["input_views"]:
+                    token.append(
+                        await tripo.upload(
+                            (store.root / op["project_id"] / (v["input_id"] + ".png")).read_bytes()
+                        )
+                    )
+            else:
+                token = await tripo.upload(
+                    (store.root / op["project_id"] / (op["input_id"] + ".png")).read_bytes()
+                )
             phase = "submit"
-            op["provider_task_id"] = await tripo.submit(token)
+            op["provider_task_id"] = await tripo.submit(token, face_limit=op["face_limit"], quad=op["quad"])
             persist(op)  # Save the vendor ID before any polling/download.
             phase = "query"
             for _ in range(120):
@@ -116,10 +162,14 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                 )
                 if existing:
                     return existing
-                if active(pid, db):
+                ongoing = [
+                    o for o in store.operations(pid, db) if o["status"] in ("queued", "running", "unknown")
+                ]
+                if any(
+                    o["status"] == "unknown" or o.get("kind") != "geometry" or o["stage"] == req.stage
+                    for o in ongoing
+                ):
                     raise HTTPException(409, "请先处理当前操作")
-                if sum(o.get("kind") == "geometry" for o in store.operations(pid, db)) >= 2:
-                    raise HTTPException(409, "首版每个角色最多提交两个几何候选，避免批量支出")
                 required_refs(p, req.stage)
                 source = revision(p, req.source_revision)
                 if (
@@ -130,7 +180,30 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                     or p["current"].get(req.stage) != source["id"]
                 ):
                     raise ValueError("只能使用已确认的当前部件参考")
-                cropped = crop_reference((store.root / pid / (source["id"] + ".png")).read_bytes(), req.crop)
+                input_views = []
+                if req.crop:
+                    cropped = crop_reference(
+                        (store.root / pid / (source["id"] + ".png")).read_bytes(), req.crop
+                    )
+                    view_id = None
+                else:
+                    views = {v["view"]: v for v in source.get("views", [])}
+                    order = ("front", "left", "back", "right")
+                    if source.get("view_split", {}).get("status") != "ready" or not all(
+                        v in views for v in order
+                    ):
+                        raise ValueError("请先完成全部四视图拆分并检查裁切预览")
+                    # Persist immutable image snapshots in vendor order, not UI quadrant order.
+                    for view in order:
+                        asset = views[view]
+                        data = (store.root / pid / (asset["id"] + ".png")).read_bytes()
+                        input_id = identity()
+                        (store.root / pid / (input_id + ".png")).write_bytes(data)
+                        input_views.append(
+                            {"view": view, "source_view_id": asset["id"], "input_id": input_id}
+                        )
+                    view_id = views["front"]["id"]
+                    cropped = (store.root / pid / (view_id + ".png")).read_bytes()
                 iid = identity()
                 (store.root / pid / (iid + ".png")).write_bytes(cropped)
                 op = {
@@ -144,8 +217,16 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
                     "status": "queued",
                     "created_at": now(),
                     "input_id": iid,
+                    "source_view": "multiview" if not req.crop else "manual_crop",
+                    "input_views": input_views,
+                    "input_mode": "multiview_to_model" if not req.crop else "image_to_model",
+                    "source_view_id": view_id,
                     "request": req.model_dump(mode="json"),
                     "texture": False,
+                    "quad": True,
+                    "face_limit": 5000 if req.stage == "head" else 20000,
+                    "model_format": "fbx",
+                    "profile_version": "quad-multiview-parts-v2",
                     "pbr": False,
                     "progress": 0,
                     "provider_task_id": None,
@@ -166,6 +247,52 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
         except ProviderError as error:
             raise HTTPException(502, str(error)) from error
 
+    class GeometryBatch(BaseModel):
+        component_revisions: dict[str, str]
+
+    async def submit_batch(pid, component_revisions):
+        if tripo is None:
+            raise HTTPException(400, "Tripo 密钥未配置")
+        try:
+            p = store.get(pid)
+        except KeyError as error:
+            raise HTTPException(404, "角色不存在") from error
+        parts = ("head", "body", "hair")
+        if set(component_revisions) != set(parts):
+            raise HTTPException(400, "请先确认三个当前部件参考")
+        for part in parts:
+            source = revision(p, component_revisions[part])
+            if (
+                not source
+                or source["stage"] != part
+                or source["stale"]
+                or not source["approved"]
+                or p["current"].get(part) != source["id"]
+            ):
+                raise HTTPException(409, "请先确认三个当前部件参考")
+            if not {"front", "left", "back", "right"}.issubset({v["view"] for v in source.get("views", [])}):
+                raise HTTPException(400, "请先完成四视图拆分并检查裁切预览")
+
+        async def submit_part(part):
+            try:
+                op = await generate(
+                    pid,
+                    GeometryRequest(
+                        stage=part,
+                        source_revision=component_revisions[part],
+                        request_id=f"geometry-quadmv2-{component_revisions[part]}-{part}",
+                    ),
+                )
+                return {"stage": part, "operation": op}
+            except HTTPException as error:
+                return {"stage": part, "error": error.detail}
+
+        return {"results": await asyncio.gather(*(submit_part(part) for part in parts))}
+
+    @app.post("/api/projects/{pid}/generate-models", status_code=202)
+    async def generate_models(pid: str, req: GeometryBatch):
+        return await submit_batch(pid, req.component_revisions)
+
     @app.post("/api/projects/{pid}/geometry/{oid}/refresh")
     async def refresh(pid: str, oid: str):
         if tripo is None:
@@ -184,7 +311,10 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             current = active(pid, db)
             if current and current["id"] != oid:
                 raise HTTPException(409, "请先完成当前操作，再查询旧任务")
-            if op["status"] == "succeeded" and (store.root / pid / (oid + ".glb")).is_file():
+            if (
+                op["status"] == "succeeded"
+                and (store.root / pid / (oid + "." + op.get("model_format", "glb"))).is_file()
+            ):
                 return op
             if op["status"] == "running":
                 raise HTTPException(409, "后台正在查询，请等待")
@@ -201,6 +331,144 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             persist(op)
             raise HTTPException(502, str(error)) from error
 
+    def ready_model(pid, oid, db=None):
+        try:
+            op = store.operation(oid, db)
+        except KeyError as error:
+            raise HTTPException(404, "模型尚未就绪") from error
+        path = store.root / pid / (oid + "." + op.get("model_format", "glb"))
+        if (
+            op["project_id"] != pid
+            or op.get("kind") != "geometry"
+            or op["status"] != "succeeded"
+            or not path.is_file()
+        ):
+            raise HTTPException(404, "模型尚未就绪")
+        return op, path
+
+    def current_source(pid, op, db=None):
+        p = store.get(pid, db)
+        rid = op["request"]["source_revision"]
+        source = revision(p, rid)
+        if not source or source["stale"] or not source["approved"] or p["current"].get(op["stage"]) != rid:
+            raise HTTPException(409, "模型参考已变更，请重新检查当前版本")
+
+    @app.get("/api/projects/{pid}/geometry/{oid}/preview")
+    def preview(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        if op.get("model_format") == "fbx":
+            if op.get("preview", {}).get("status") != "ready":
+                return FileResponse(path, media_type="application/octet-stream", headers={"X-Model-Format": "fbx"})
+            path = path.with_name(oid + "-preview.glb")
+        return FileResponse(path, media_type="model/gltf-binary")
+
+    pending_previews = set()
+
+    @app.post("/api/projects/{pid}/geometry/{oid}/prepare-preview")
+    async def prepare_preview(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        if op.get("model_format") != "fbx":
+            return op
+        if oid in pending_previews:
+            raise HTTPException(409, "预览正在准备，请稍候")
+        pending_previews.add(oid)
+        try:
+            op["preview"] = await prepare_fbx_preview(path)
+            # Reload after the worker so simultaneous approvals are preserved.
+            with store.connect() as db:
+                current = store.operation(oid, db)
+                current["preview"] = op["preview"]
+                store.put_operation(db, current)
+            return current
+        except Exception as error:
+            raise HTTPException(500, "FBX 预览转换失败，原始四边形文件保留。") from error
+        finally:
+            pending_previews.discard(oid)
+
+    @app.get("/api/projects/{pid}/geometry/{oid}/info")
+    def info(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        if op.get("model_format") == "fbx":
+            return {
+                "format": "FBX",
+                "bytes": path.stat().st_size,
+                "requested_face_limit": op.get("face_limit"),
+                "quad_requested": op.get("quad"),
+                "preview": op.get("preview", {}),
+                **op.get("preview", {}).get("topology", {}),
+            }
+        try:
+            return model_info(path)
+        except (ValueError, OSError) as error:
+            raise HTTPException(400, "模型文件无法读取") from error
+
+    @app.post("/api/projects/{pid}/geometry/{oid}/approve")
+    def approve_model(pid: str, oid: str, req: GeometryApproval):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            op, path = ready_model(pid, oid, db)
+            current_source(pid, op, db)
+            try:
+                if op.get("model_format") == "fbx":
+                    with path.open("rb") as file:
+                        header = file.read(64)
+                    if not (
+                        header.startswith(b"Kaydara FBX Binary  \x00\x1a\x00")
+                        or header.lstrip().startswith(b"; FBX")
+                    ):
+                        raise ValueError("Invalid FBX")
+                    metadata = {
+                        "format": "FBX",
+                        "bytes": path.stat().st_size,
+                        **op.get("preview", {}).get("topology", {}),
+                    }
+                else:
+                    metadata = model_info(path)
+            except (ValueError, OSError) as error:
+                raise HTTPException(400, "模型文件无法读取") from error
+            op.update(
+                visual_approved=True,
+                visual_approved_at=op.get("visual_approved_at") or now(),
+                model_info=metadata,
+            )
+            store.put_operation(db, op)
+        return op
+
+    @app.get("/api/projects/{pid}/geometry/{oid}/blender-package")
+    def blender_package(pid: str, oid: str):
+        op, path = ready_model(pid, oid)
+        current_source(pid, op)
+        if not op.get("visual_approved"):
+            raise HTTPException(409, "请先检查并确认模型")
+        out = io.BytesIO()
+        name = op["stage"] + "." + op.get("model_format", "glb")
+        manifest = {
+            "schema_version": 1,
+            "models": [
+                {
+                    "path": name,
+                    "part": op["stage"],
+                    "operation_id": oid,
+                    "source_revision": op["request"]["source_revision"],
+                }
+            ],
+        }
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(path, name)
+            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+            archive.write(
+                Path(__file__).resolve().parents[2] / "scripts" / "import_blender.py", "import_blender.py"
+            )
+            archive.writestr(
+                "README.txt",
+                "Unzip this package. In Blender's Scripting workspace, open import_blender.py from the unzipped folder and run it, or run: blender --background --python import_blender.py\nThe script imports the model into a new collection in the current scene and saves a new file in this folder. It does not align, merge or rig the character.\n",
+            )
+        return Response(
+            out.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{op["stage"]}-blender-{oid[:8]}.zip"'},
+        )
+
     @app.get("/api/projects/{pid}/geometry/{oid}/download")
     def download(pid: str, oid: str):
         try:
@@ -209,4 +477,7 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             raise HTTPException(404, "任务不存在") from error
         if op["project_id"] != pid or op.get("kind") != "geometry" or op["status"] != "succeeded":
             raise HTTPException(404, "模型尚未就绪")
-        return FileResponse(store.root / pid / (oid + ".glb"), filename=op["stage"] + "-geometry.glb")
+        suffix = "." + op.get("model_format", "glb")
+        return FileResponse(store.root / pid / (oid + suffix), filename=op["stage"] + "-" + oid[:8] + suffix)
+
+    return submit_batch

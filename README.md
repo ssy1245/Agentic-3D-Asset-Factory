@@ -79,3 +79,37 @@ Tripo 密钥验证通过，API 钱包返回余额 0，因此没有提交真实�
 当前使用 Images API，应用管理的通用约束、步骤要求和用户反馈合并为一个 prompt；并不是额外发送一个 system 消息。提示词只是初版，尚未完成逐步效果调优。
 
 真实测试项目：`真实 API 验证 · 白发角色`，已完成一次整体图出图，跨视图一致性与真实圈画修改仍待单独验证。后续不自动发起付费测试。
+
+
+### Browser 3D preview
+
+Install the pinned browser viewer dependency once with `npm ci`, then start the Python studio as usual. The component pages can preview local GLB files and saved API geometry results. Inspect and approve a saved candidate before using its GLB download or Blender-package export. The Blender ZIP contains a model, manifest and import script; run the script in Blender to save a `.blend`. This step imports and organizes the asset; character assembly and rigging remain separate.
+
+
+### Phase 4: parallel geometry generation
+
+Configure `TRIPO_API_KEY` (or `Tripo_AI_API_KEY`) on the backend. Approving the last of the three current component references automatically starts one untextured 3D task per component using its four saved Front / Left / Back / Right images and opens phase 4. These are paid API requests. Projects already fully approved before the update have a manual initial submission button. Refreshing reads saved status and does not submit again. Each result can be previewed, approved and exported; texture generation and assembly follow later.
+
+Current geometry settings request quad meshes (`quad=true`), with `face_limit=5000` for Head and `face_limit=20000` for Body & outfit and Hair. Texture, PBR and UV export are disabled. These are requested limits, not a guarantee of exact output counts; 20,000 is our project setting rather than the API's overall maximum. Smart low-poly is disabled because its quad mode only supports up to 10,000 faces.
+
+Tripo returns FBX for quad generation ([official generation API](https://platform.tripo3d.ai/docs/generation)). Original FBX files are preserved for download and Blender export. If local Blender is available, the app creates a separate GLB for browser viewing and records the original polygon counts before conversion; GLB triangulation does not change the saved FBX. Set optional `BLENDER_BINARY` to the Blender executable if it is not detected automatically. Without Blender, download and inspect the original FBX externally, then acknowledge inspection in the UI; preparing a preview again does not call Tripo or regenerate the model.
+
+### Component inspection pages and topology toggle
+
+Phase 4 provides separate Head, Body & outfit and Hair pages, accessible from the sidebar or component tabs. Each page lists only that part's saved candidates; this prepares the review UI for future multi-candidate generation, without creating extra paid jobs.
+
+The local Three.js inspector uses a dark background and lit white-model display. **Show topology edges** toggles visible mesh edges over the solid model; original materials and X-ray wire views are also available. Rotation, zoom and camera shortcuts remain supported. GLB edges are triangles, including triangulation of FBX preview copies, so this view must not be treated as the original FBX quad topology. No inspection display setting modifies the exported asset.
+
+### Four-view generation correction
+
+The initial geometry jobs used only the Front crop via `image_to_model`; those existing outputs are retained and labeled as single-view inputs. New standard batches use `multiview_to_model` with four separately uploaded crops in strict vendor order **front, left, back, right**, rather than uploading a four-panel sheet as one image ([official H3 API](https://docs.tripo3d.ai/model-generation/multiview-to-model-v3-0-v3-1.html)). Each operation saves immutable input snapshots and source view IDs. Missing views block submission. New request IDs distinguish this configuration from previous single-view jobs; refresh never regenerates them. The legacy manual crop endpoint remains explicitly single-view.
+
+34 tests pass, including the multiview payload order, input snapshot identity, quad/face settings and three-component concurrency. No new paid generation was used for this correction; improved output quality remains to be tested. Thumbnail/default camera presets were adjusted to show the current Tripo models' front. Detailed inspection supports left-drag orbit, scroll zoom and right-drag pan.
+
+### Required geometry policy
+
+Always generate quad meshes. The provider defaults to `quad=true` and rejects requests that disable it before making a network call. This applies to both multiview batches and manual single-image trials. GLB triangulation is only for browser display; preserve and export the original quad FBX. Do not downgrade to triangle generation to work around preview failures.
+
+### FBX preview without Blender
+
+Generated FBX files can now load directly in the browser through the local Three.js FBXLoader, including thumbnails and the detailed inspector. Blender is optional for preparing a derived GLB and measuring original polygon statistics. When no GLB exists, the preview route serves the original FBX and the frontend uses the FBX loader. Original files and quad generation settings remain unchanged; browser rendering triangulates faces internally, so rendered wireframe is not a measurement of original quad topology.

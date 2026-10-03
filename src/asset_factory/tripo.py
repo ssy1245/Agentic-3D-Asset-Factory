@@ -55,18 +55,29 @@ class TripoProvider:
             raise ProviderError("Tripo 上传未返回图片编号。")
         return token
 
-    async def submit(self, token):
+    async def submit(self, token, *, face_limit=50000, quad=True):
+        if quad is not True:
+            raise ValueError("本项目只允许生成四边形模型，不能关闭 quad")
+        if isinstance(token, list) and (len(token) != 4 or not all(token)):
+            raise ValueError("多视图需要完整的 front、left、back、right 四张输入")
+        images = (
+            {"files": [{"type": "png", "file_token": t} for t in token]}
+            if isinstance(token, list)
+            else {"file": {"type": "png", "file_token": token}}
+        )
         data = await self.request(
             "POST",
             "/task",
             json={
-                "type": "image_to_model",
+                "type": "multiview_to_model" if isinstance(token, list) else "image_to_model",
                 "model_version": self.model,
-                "file": {"type": "png", "file_token": token},
+                **images,
                 "texture": False,
                 "pbr": False,
                 "export_uv": False,
-                "face_limit": 50000,
+                "face_limit": face_limit,
+                "quad": quad,
+                "smart_low_poly": False,
             },
         )
         task_id = data.get("task_id")
@@ -99,9 +110,15 @@ class TripoProvider:
                             raise ProviderError("模型超过当前 100 MB 下载上限。")
                         file.write(chunk)
             with temporary.open("rb") as file:
-                header = file.read(12)
-            if (
-                len(header) != 12
+                header = file.read(64)
+            if path.suffix.lower() == ".fbx":
+                if not (
+                    header.startswith(b"Kaydara FBX Binary  \x00\x1a\x00")
+                    or header.lstrip().startswith(b"; FBX")
+                ):
+                    raise ProviderError("下载结果不是有效的 FBX 文件，请核对 Tripo 输出。")
+            elif (
+                len(header) < 12
                 or header[:4] != b"glTF"
                 or int.from_bytes(header[4:8], "little") != 2
                 or int.from_bytes(header[8:12], "little") != size

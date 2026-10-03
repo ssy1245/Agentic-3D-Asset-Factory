@@ -174,14 +174,17 @@ def test_approval_dependency_and_successful_edit_invalidation(client):
     approve(client, pid, "turnaround")
 
 
-def test_duplicate_and_budget(client):
+def test_duplicate_and_unlimited_development_calls(client):
     pid = project(client, max_calls=1)
     first = submit(client, pid, request_id="same-request").json()
     finished(client, pid)
     second = submit(client, pid, request_id="same-request").json()
     assert first["id"] == second["id"]
     assert client.provider.calls == 1
-    assert submit(client, pid).status_code == 409
+    assert submit(client, pid).status_code == 202
+    finished(client, pid)
+    assert client.provider.calls == 2
+    assert client.get(f"/api/projects/{pid}").json()["max_calls"] is None
 
 
 def test_unknown_failure_keeps_original_and_blocks_retry(client):
@@ -407,20 +410,134 @@ def test_brush_requires_current_source_and_valid_coordinates(client):
     assert client.provider.calls == 0
 
 
-def test_all_five_steps_are_sequential_and_relock(client):
+def test_parallel_components_dependencies_and_isolated_edits(client):
     pid = project(client)
-    for stage in ["design", "turnaround", "head", "body", "hair"]:
-        order = ["design", "turnaround", "head", "body", "hair"]
-        for later in order[order.index(stage) + 1 :]:
-            assert submit(client, pid, later).status_code == 400
+    for part in ("head", "body", "hair"):
+        assert submit(client, pid, part).status_code == 400
+    for stage in ("design", "turnaround"):
+        submit(client, pid, stage)
+        approve(client, pid, stage)
+    for stage in ("head", "body", "hair"):
         submit(client, pid, stage)
         approve(client, pid, stage)
     p = finished(client, pid)
-    submit(client, pid, "head", source_revision=p["current"]["head"], feedback="fix ears")
+    assert (
+        submit(client, pid, "head", source_revision=p["current"]["head"], feedback="fix ears").status_code
+        == 202
+    )
     p = finished(client, pid)
-    assert all(r["stale"] for r in p["revisions"] if r["stage"] in ("body", "hair"))
-    assert submit(client, pid, "hair").status_code == 400
-    assert client.post(f"/api/projects/{pid}/approve/{p['current']['body']}").status_code == 400
+    assert all(not r["stale"] and r["approved"] for r in p["revisions"] if r["stage"] in ("body", "hair"))
+    assert (
+        submit(
+            client, pid, "turnaround", source_revision=p["current"]["turnaround"], feedback="change design"
+        ).status_code
+        == 202
+    )
+    p = finished(client, pid)
+    assert all(r["stale"] for r in p["revisions"] if r["stage"] in ("head", "body", "hair"))
+
+
+def test_component_batch_is_concurrent_and_idempotent(tmp_path):
+    class Concurrent(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.running = self.maximum = 0
+
+        async def generate(self, *args):
+            self.running += 1
+            self.maximum = max(self.maximum, self.running)
+            await asyncio.sleep(0.05)
+            result = await super().generate(*args)
+            self.running -= 1
+            return result
+
+    provider = Concurrent()
+    with TestClient(create_app(tmp_path, {"demo": provider})) as c:
+        pid = project(c)
+        for stage in ("design", "turnaround"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        p = finished(c, pid)
+        authority = p["current"]["turnaround"]
+        payload = {"turnaround_revision": authority}
+        first = c.post(f"/api/projects/{pid}/generate-components", json=payload)
+        assert first.status_code == 202
+        assert all("operation" in r for r in first.json()["results"])
+        second = c.post(f"/api/projects/{pid}/generate-components", json=payload)
+        assert [r["operation"]["id"] for r in first.json()["results"]] == [
+            r["operation"]["id"] for r in second.json()["results"]
+        ]
+        p = finished(c, pid)
+        assert provider.maximum == 3 and provider.calls == 5
+        assert all(o["reference_ids"] == [authority] for o in p["operations"][-3:])
+
+
+def test_review_failure_keeps_generated_component(tmp_path):
+    class BrokenReview:
+        async def review(self, *args):
+            raise ValueError("mock review failure")
+
+    with TestClient(create_app(tmp_path, {"openai": FakeProvider()}, reviewer=BrokenReview())) as c:
+        pid = c.post("/api/projects", data={"name": "review", "provider": "openai"}).json()["id"]
+        for stage in ("design", "turnaround"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        submit(c, pid, "hair")
+        for _ in range(100):
+            p = finished(c, pid)
+            r = p["revisions"][-1]
+            if r.get("quality_review", {}).get("status") == "unavailable":
+                break
+            time.sleep(0.01)
+        assert p["operations"][-1]["status"] == "succeeded"
+        assert r["quality_review"]["status"] == "unavailable"
+        assert not r["approved"]
+        assert c.get(r["image_url"]).status_code == 200
+
+
+def test_visual_review_schema_and_image_inputs():
+    from asset_factory.review import VisualReviewer
+
+    async def handler(request):
+        payload = json.loads(request.content)
+        assert payload["text"]["format"]["type"] == "json_schema"
+        assert len(payload["input"][0]["content"]) == 3
+        assert payload["store"] is False
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "verdict": "pass",
+                                        "summary": "Face left in hair",
+                                        "findings": [
+                                            {
+                                                "view": "front",
+                                                "severity": "error",
+                                                "description": "Face remains",
+                                                "suggested_change": "Remove face",
+                                            }
+                                        ],
+                                    }
+                                ),
+                            }
+                        ]
+                    }
+                ],
+                "usage": {"total_tokens": 20},
+            },
+        )
+
+    result = asyncio.run(
+        VisualReviewer("test-key", transport=httpx.MockTransport(handler)).review("hair", png(), png())
+    )
+    assert result["verdict"] == "needs_review" and result["human_review_required"]
 
 
 class FakeTripo:
@@ -436,7 +553,7 @@ class FakeTripo:
     async def upload(self, image):
         return "uploaded-token"
 
-    async def submit(self, token):
+    async def submit(self, token, **settings):
         self.submissions += 1
         return "vendor-task"
 
@@ -444,7 +561,7 @@ class FakeTripo:
         return {"status": "success", "progress": 100, "consumed_credit": 40, "output": {}}
 
     async def download(self, output, path):
-        path.write_bytes(b"fake-model-test")
+        path.write_bytes(b"; FBX 7.4.0 project file\n; mock fixture")
 
 
 def test_geometry_pipeline_duplicate_and_saved_task(tmp_path):
@@ -467,7 +584,7 @@ def test_geometry_pipeline_duplicate_and_saved_task(tmp_path):
         assert op["status"] == "succeeded"
         assert op["provider_task_id"] == "vendor-task"
         assert not op["texture"] and not op["pbr"]
-        assert c.get(op["download_url"]).content == b"fake-model-test"
+        assert c.get(op["download_url"]).content == b"; FBX 7.4.0 project file\n; mock fixture"
         assert c.post(f"/api/projects/{pid}/geometry", json=payload).json()["id"] == op["id"]
         assert tripo.submissions == 1
 
@@ -506,6 +623,7 @@ def test_tripo_http_contract_without_paid_calls(tmp_path):
         if req.url.path.endswith("/task"):
             payload = json.loads(req.content)
             assert payload["file"]["file_token"] == "image-token"
+            assert payload["quad"] is True
             assert payload["texture"] is False and payload["pbr"] is False
             return httpx.Response(200, json={"code": 0, "data": {"task_id": "task-id"}})
         return httpx.Response(200, json={"code": 0, "data": {"balance": 100}})
@@ -523,8 +641,19 @@ def test_default_app_disables_3d_even_with_key(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIPO_API_KEY", "test-only-not-used")
     with TestClient(create_app(tmp_path, {"demo": FakeProvider()})) as c:
         assert c.get("/api/config").json()["tripo_configured"] is False
-        assert c.get("/api/services/tripo/balance").status_code == 404
-        assert c.post("/api/projects/unused/geometry", json={}).status_code == 404
+        assert c.get("/api/services/tripo/balance").json() == {"configured": False}
+        assert (
+            c.post(
+                "/api/projects/unused/geometry",
+                json={
+                    "stage": "head",
+                    "source_revision": "unused",
+                    "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
+                    "request_id": "disabled-test",
+                },
+            ).status_code
+            == 400
+        )
 
 
 def test_prompt_snapshot_is_recorded_and_visible(client):
@@ -536,3 +665,333 @@ def test_prompt_snapshot_is_recorded_and_visible(client):
     assert template["version"] == p["revisions"][-1]["prompt_template_version"]
     assert template["common"] in p["operations"][-1]["prompt"]
     assert template["instructions"] in p["operations"][-1]["prompt"]
+
+
+def test_revision_combines_current_visual_review_and_user_feedback(client):
+    pid = project(client)
+    for stage in ("design", "turnaround"):
+        submit(client, pid, stage)
+        approve(client, pid, stage)
+    submit(client, pid, "hair")
+    p = finished(client, pid)
+    source = p["current"]["hair"]
+    authority = p["current"]["turnaround"]
+    report = {
+        "status": "completed",
+        "source_revision": source,
+        "authority_revision": authority,
+        "prompt_version": "review-test",
+        "summary": "Ear remains in left view.",
+        "findings": [
+            {
+                "view": "left",
+                "severity": "error",
+                "description": "Ear fragment",
+                "suggested_change": "Remove the ear fragment, preserve bangs.",
+            }
+        ],
+    }
+    store = client.app.state.store
+    with store.connect() as db:
+        p = store.get(pid, db)
+        next(r for r in p["revisions"] if r["id"] == source)["quality_review"] = report
+        store.put(db, p)
+    response = submit(
+        client,
+        pid,
+        "hair",
+        source_revision=source,
+        feedback="Keep natural gaps.",
+        request_id="review-combined-test",
+    )
+    assert response.status_code == 202
+    p = finished(client, pid)
+    op = p["operations"][-1]
+    assert op["reference_ids"] == [source, authority]
+    assert op["context_snapshot"]["edit_source_quality_review"]["findings"] == report["findings"]
+    assert (
+        "Remove the ear fragment" in op["prompt"] and "Requested changes: Keep natural gaps." in op["prompt"]
+    )
+    assert "User requests take priority" in op["prompt"]
+    assert (
+        submit(
+            client,
+            pid,
+            "hair",
+            source_revision=source,
+            feedback="Keep natural gaps.",
+            request_id="review-combined-test",
+        ).json()["id"]
+        == op["id"]
+    )
+
+
+@pytest.mark.parametrize(
+    "status,report_source,expected",
+    [
+        ("completed", "current", 202),
+        ("completed", "other", 400),
+        ("unavailable", "current", 400),
+        ("running", "current", 409),
+    ],
+)
+def test_review_only_revision_requires_completed_matching_report(client, status, report_source, expected):
+    pid = project(client)
+    for stage in ("design", "turnaround"):
+        submit(client, pid, stage)
+        approve(client, pid, stage)
+    submit(client, pid, "head")
+    p = finished(client, pid)
+    source = p["current"]["head"]
+    store = client.app.state.store
+    with store.connect() as db:
+        p = store.get(pid, db)
+        next(r for r in p["revisions"] if r["id"] == source)["quality_review"] = {
+            "status": status,
+            "source_revision": source if report_source == "current" else "other",
+            "authority_revision": p["current"]["turnaround"],
+            "findings": [
+                {
+                    "view": "right",
+                    "description": "Mouth closed",
+                    "suggested_change": "Match front mouth opening",
+                }
+            ],
+        }
+        store.put(db, p)
+    assert submit(client, pid, "head", source_revision=source).status_code == expected
+    if expected == 202:
+        assert "Match front mouth opening" in finished(client, pid)["operations"][-1]["prompt"]
+
+
+def test_model_preview_approval_and_blender_export(tmp_path):
+    import struct
+
+    document = {"asset": {"version": "2.0"}, "meshes": [{"primitives": [{"attributes": {}}]}]}
+    chunk = json.dumps(document).encode()
+    chunk += b" " * (-len(chunk) % 4)
+    glb = b"glTF" + struct.pack("<II", 2, 20 + len(chunk)) + struct.pack("<I", len(chunk)) + b"JSON" + chunk
+
+    class ModelTripo(FakeTripo):
+        async def download(self, output, path):
+            path.write_bytes(glb)
+
+    with TestClient(create_app(tmp_path, {"demo": FakeProvider()}, tripo=ModelTripo())) as c:
+        pid = project(c)
+        other = project(c)
+        for stage in ("design", "turnaround", "head"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        source = finished(c, pid)["current"]["head"]
+        response = c.post(
+            f"/api/projects/{pid}/geometry",
+            json={
+                "stage": "head",
+                "source_revision": source,
+                "crop": {"x": 0, "y": 0, "width": 0.5, "height": 1},
+                "request_id": "model-preview-test",
+            },
+        )
+        assert response.status_code == 202
+        op = finished(c, pid)["operations"][-1]
+        # This existing GLB fixture covers legacy results alongside new FBX results.
+        (tmp_path / pid / (op["id"] + ".fbx")).rename(tmp_path / pid / (op["id"] + ".glb"))
+        op["model_format"] = "glb"
+        with c.app.state.store.connect() as db:
+            c.app.state.store.put_operation(db, op)
+        base = f"/api/projects/{pid}/geometry/{op['id']}"
+        assert c.get(base + "/preview").content == glb
+        assert c.get(base + "/preview").headers["content-type"] == "model/gltf-binary"
+        assert c.get(base + "/info").json()["meshes"] == 1
+        assert c.get(base + "/blender-package").status_code == 409
+        assert c.post(base + "/approve", json={"checked": False}).status_code == 422
+        assert c.post(base + "/approve", json={"checked": True}).json()["visual_approved"]
+        with zipfile.ZipFile(io.BytesIO(c.get(base + "/blender-package").content)) as archive:
+            assert archive.read("head.glb") == glb
+            assert json.loads(archive.read("manifest.json"))["models"][0]["source_revision"] == source
+            assert "bpy.ops.import_scene.gltf" in archive.read("import_blender.py").decode()
+        assert c.get(f"/api/projects/{other}/geometry/{op['id']}/preview").status_code == 404
+        submit(c, pid, "head", source_revision=source, feedback="change head")
+        finished(c, pid)
+        assert c.post(base + "/approve", json={"checked": True}).status_code == 409
+        assert c.get(base + "/blender-package").status_code == 409
+
+
+def test_last_component_approval_starts_parallel_models_once(tmp_path):
+    class ParallelTripo(FakeTripo):
+        def __init__(self):
+            super().__init__()
+            self.running = 0
+            self.maximum = 0
+
+        async def upload(self, image):
+            self.running += 1
+            self.maximum = max(self.maximum, self.running)
+            await asyncio.sleep(0.04)
+            self.running -= 1
+            return "test-token"
+
+        async def submit(self, token, **settings):
+            await asyncio.sleep(0.04)
+            self.submissions += 1
+            return f"test-task-{self.submissions}"
+
+    tripo = ParallelTripo()
+    with TestClient(create_app(tmp_path, {"demo": FakeProvider()}, tripo=tripo)) as c:
+        pid = project(c)
+        for stage in ("design", "turnaround"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        for part in ("head", "body", "hair"):
+            submit(c, pid, part)
+        p = finished(c, pid)
+        refs = {part: p["current"][part] for part in ("head", "body", "hair")}
+        assert (
+            c.post(f"/api/projects/{pid}/generate-models", json={"component_revisions": refs}).status_code
+            == 409
+        )
+        approve(c, pid, "hair")
+        approve(c, pid, "head")
+        assert tripo.submissions == 0
+        response = c.post(f"/api/projects/{pid}/approve/{refs['body']}")
+        assert response.status_code == 200
+        assert len(response.json()["model_submission"]["results"]) == 3
+        p = finished(c, pid)
+        models = [o for o in p["operations"] if o.get("kind") == "geometry"]
+        assert len(models) == 3 and tripo.maximum == 3 and tripo.submissions == 3
+        for op in models:
+            assert op["quad"] is True
+            assert op["face_limit"] == (5000 if op["stage"] == "head" else 20000)
+            assert op["model_format"] == "fbx"
+            source = next(r for r in p["revisions"] if r["id"] == refs[op["stage"]])
+            front = next(v for v in source["views"] if v["view"] == "front")
+            assert op["source_view_id"] == front["id"] and op["source_view"] == "multiview"
+            assert [v["view"] for v in op["input_views"]] == ["front", "left", "back", "right"]
+            for v in op["input_views"]:
+                assert (tmp_path / pid / (v["input_id"] + ".png")).read_bytes() == (
+                    tmp_path / pid / (v["source_view_id"] + ".png")
+                ).read_bytes()
+            assert (tmp_path / pid / (op["input_id"] + ".png")).read_bytes() == (
+                tmp_path / pid / (front["id"] + ".png")
+            ).read_bytes()
+        c.post(f"/api/projects/{pid}/approve/{refs['body']}")
+        assert (
+            c.post(f"/api/projects/{pid}/generate-models", json={"component_revisions": refs}).status_code
+            == 202
+        )
+        assert tripo.submissions == 3
+
+
+@pytest.mark.parametrize("face_limit", [5000, 20000])
+def test_quad_request_and_fbx_download_contract(tmp_path, face_limit):
+    from asset_factory.tripo import TripoProvider
+
+    fbx = b"; FBX 7.4.0 project file\n; mock quad output"
+
+    def handler(req):
+        if req.url.host == "cdn.tripo3d.ai":
+            assert "authorization" not in req.headers
+            return httpx.Response(200, content=fbx)
+        payload = json.loads(req.content)
+        assert payload["quad"] is True and payload["face_limit"] == face_limit
+        assert payload["smart_low_poly"] is False
+        assert payload["texture"] is False and payload["pbr"] is False and payload["export_uv"] is False
+        return httpx.Response(200, json={"code": 0, "data": {"task_id": "quad-test"}})
+
+    provider = TripoProvider("not-real", transport=httpx.MockTransport(handler))
+    assert asyncio.run(provider.submit("token", face_limit=face_limit, quad=True)) == "quad-test"
+    path = tmp_path / "quad.fbx"
+    asyncio.run(provider.download({"base_model": "https://cdn.tripo3d.ai/quad.fbx"}, path))
+    assert path.read_bytes() == fbx
+
+
+def test_fbx_without_blender_keeps_original_and_can_export(tmp_path, monkeypatch):
+    async def unavailable(path):
+        return {"status": "unavailable", "reason": "Blender not installed"}
+
+    monkeypatch.setattr("asset_factory.geometry.prepare_fbx_preview", unavailable)
+    with TestClient(create_app(tmp_path, {"demo": FakeProvider()}, tripo=FakeTripo())) as c:
+        pid = project(c)
+        for stage in ("design", "turnaround", "head"):
+            submit(c, pid, stage)
+            approve(c, pid, stage)
+        source = finished(c, pid)["current"]["head"]
+        response = c.post(
+            f"/api/projects/{pid}/geometry",
+            json={"stage": "head", "source_revision": source, "request_id": "quad-fallback-test"},
+        )
+        assert response.status_code == 202
+        op = finished(c, pid)["operations"][-1]
+        base = f"/api/projects/{pid}/geometry/{op['id']}"
+        assert op["status"] == "succeeded" and op["preview"]["status"] == "unavailable"
+        preview = c.get(base + "/preview")
+        assert preview.status_code == 200 and preview.headers["x-model-format"] == "fbx"
+        assert preview.content == c.get(base + "/download").content
+        assert c.get(base + "/info").json()["requested_face_limit"] == 5000
+        original = c.get(base + "/download").content
+        assert original.startswith(b"; FBX")
+        assert c.post(base + "/prepare-preview").json()["preview"]["status"] == "unavailable"
+        assert c.post(base + "/approve", json={"checked": True}).status_code == 200
+        with zipfile.ZipFile(io.BytesIO(c.get(base + "/blender-package").content)) as archive:
+            assert archive.read("head.fbx") == original
+            assert "bpy.ops.import_scene.fbx" in archive.read("import_blender.py").decode()
+
+
+def test_tripo_multiview_payload_order():
+    from asset_factory.tripo import TripoProvider
+
+    def handler(req):
+        payload = json.loads(req.content)
+        assert payload["type"] == "multiview_to_model" and "file" not in payload
+        assert [v["file_token"] for v in payload["files"]] == [
+            "front-token",
+            "left-token",
+            "back-token",
+            "right-token",
+        ]
+        assert payload["quad"] is True and payload["face_limit"] == 5000
+        assert payload["texture"] is False and payload["pbr"] is False
+        return httpx.Response(200, json={"code": 0, "data": {"task_id": "multi-test"}})
+
+    provider = TripoProvider("fake", transport=httpx.MockTransport(handler))
+    assert (
+        asyncio.run(
+            provider.submit(
+                ["front-token", "left-token", "back-token", "right-token"], face_limit=5000, quad=True
+            )
+        )
+        == "multi-test"
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(provider.submit(["front-token"], quad=True))
+
+
+def test_tripo_rejects_triangle_generation_before_network():
+    from asset_factory.tripo import TripoProvider
+
+    def handler(req):
+        pytest.fail("triangle generation must never reach Tripo")
+
+    provider = TripoProvider("fake", transport=httpx.MockTransport(handler))
+    with pytest.raises(ValueError, match="四边形"):
+        asyncio.run(provider.submit("token", quad=False))
+
+
+def test_reopen_approved_component_preserves_images_and_siblings(client):
+    pid = project(client)
+    for stage in ("design", "turnaround", "head", "body", "hair"):
+        submit(client, pid, stage)
+        approve(client, pid, stage)
+    before = finished(client, pid)
+    rid = before["current"]["body"]
+    image = client.get(f"/api/projects/{pid}/images/{rid}").content
+    assert client.post(f"/api/projects/{pid}/reopen/{rid}").status_code == 200
+    after = finished(client, pid)
+    assert after["current"] == before["current"]
+    assert len(after["revisions"]) == len(before["revisions"])
+    assert next(r for r in after["revisions"] if r["id"] == rid)["approved"] is False
+    for part in ("head", "hair"):
+        assert next(r for r in after["revisions"] if r["id"] == after["current"][part])["approved"] is True
+    assert client.get(f"/api/projects/{pid}/images/{rid}").content == image
+    approve(client, pid, "body")
+    assert len(finished(client, pid)["operations"]) == len(before["operations"])

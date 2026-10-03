@@ -26,7 +26,8 @@ class Store:
                     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, request_id TEXT NOT NULL,
                     status TEXT NOT NULL, data TEXT NOT NULL,
                     UNIQUE(project_id, request_id));
-                CREATE UNIQUE INDEX IF NOT EXISTS one_active_operation ON operations(project_id)
+                DROP INDEX IF EXISTS one_active_operation;
+                CREATE UNIQUE INDEX IF NOT EXISTS one_active_operation_per_stage ON operations(project_id, json_extract(data, '$.stage'))
                 WHERE status IN ('queued','running','unknown');
             """)
 
@@ -97,3 +98,18 @@ class Store:
                         status="unknown", error="服务在请求期间中断，结果及扣费未知。请先核对供应商记录。"
                     )
                 self.put_operation(db, op)
+
+            # Interrupted advisory reviews never trigger a second image request.
+            for row in db.execute("SELECT data FROM projects").fetchall():
+                project = json.loads(row["data"])
+                changed = False
+                for r in project["revisions"]:
+                    if r.get("quality_review", {}).get("status") == "running":
+                        r["quality_review"] = {
+                            "status": "unavailable",
+                            "summary": "Review interrupted by restart. Inspect manually; no automatic retry.",
+                            "human_review_required": True,
+                        }
+                        changed = True
+                if changed:
+                    self.put(db, project)
