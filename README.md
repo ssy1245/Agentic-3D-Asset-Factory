@@ -1,115 +1,160 @@
 # Agentic 3D Asset Factory
 
-目标是生成角色参考与三维零件，筛选几何候选，只给选中的几何生成材质，最终交付 Blender 工程。用户可使用自己的 Codex 继续装配和局部精修。
+一个面向角色创作者的 AI 资产制作工具：从文字或已有设计图开始，生成整体四视图和部件参考图，分别制作 Head、Body & outfit、Hair 的三维资产，最终交付可继续编辑的 Blender 项目与对应参考图。
 
-目前已实现第一阶段 **Reference Studio（角色参考工作室）**：简易网页前端、参考图生成接口、用户修改反馈与版本管理。已接入 OpenAI 真实出图。当前按用户要求暂停 3D，页面隐藏三维入口，默认后端不注册三维接口、不读取 Tripo 余额。已有 Tripo 适配代码暂存，不代表当前启用。
+**当前是已跑通主要流程的早期 demo。** 我们已验证真实图片生成、三部件生成、贴图、浏览器预览以及包含原生 `.blend` 的项目 ZIP 导出；尚未证明它在多个角色上稳定优于整个人物一次生成，也不把当前输出称为已完成绑定的生产级角色。
 
-## 启动
+## 用户与产品边界
 
-在本目录执行：
+目标用户是需要角色模型初稿、但不想反复在多个生成工具之间传递图片和整理资产的创作者。软件把参考、反馈、检查、生成与交付组织在同一个角色项目里，并保留部件独立编辑的可能。
+
+我们的交付终点是 **可打开的 Blender 资产和所选版本的参考图**。Head、Body、Hair 已放进同一个场景，但仍保留生成时的位置和尺度；位置、比例、颈部衔接和穿插需要后续调整。它们不自动合并，也没有完成骨骼绑定。
+
+用户可以用 Blender 基础操作完成组装，或者在自己的 Codex 中打开解压后的项目文件夹继续调整。项目成员的一次 Jinx 试用表明，组装可以用基础 Blender 操作完成，外部 Codex 辅助的额度消耗也较低；这是单次可行性观察，不是对所有角色的耗时或费用保证。
+
+**目前不计划在软件内嵌一个复刻 Codex 能力的 Blender Agent。** 用户已经拥有的 Blender/Codex 可以承担开放式精修；重新实现同等工具访问、上下文和操作能力会增加工程维护和 API 成本。我们将开发资源集中在参考一致性、部件质量、反馈效率与可靠交付上。这是当前的产品范围选择，仍需用实际用户测试检验。
+
+## 当前工作流
+
+1. **整体设计**：文字生成或已有图像生成；设计描述选填。上传参考图、圈画问题并填写修改意见。
+2. **整体四视图**：确认整体设计后自动生成 Front / Left / Back / Right。要求适合后续建模的初始站姿、适当腿间距；自动裁切后由用户检查。
+3. **并行部件参考**：确认整体四视图后，并行生成 Head、Body & outfit、Hair 的四视图。每个部件继承整体参考，并单独检查、修改和确认。
+4. **AI 结构检查**：检查部件隔离、表情一致性、头颈接口、头发残留脸/耳朵和刘海走线等。用户生成修订版时会结合检查建议与自己的意见。检查是辅助判断，不会自动无限重试。
+5. **并行白模生成**：三个部件参考全部确认后，分别上传四张独立视图到 Tripo，先生成无材质模型。可逐部件旋转查看、比较候选或重新生成。
+6. **可选贴图**：对选中的白模点击 Generate texture。系统复制原白模，在副本上生成贴图，并使用该候选的四视图输入；原白模和已有结果保留。提交贴图后原白模仍可生成新的几何候选。
+7. **项目导出**：选择各部件的候选版本，输出 `项目名.zip`。解压后直接打开 `.blend`，或把整个文件夹交给用户自己的 Codex。
+
+左侧按整体设计 → 四视图 → 并行部件 → 3D 解锁；已完成步骤可以返回。上游变更会使相关下游结果标记为待更新。参考和模型版本保留在应用内，**项目交付包不包含历史消息或全部历史图片**。
+
+## 项目交付包
+
+例如 Jinx 项目：
+
+```text
+Jinx.zip
+├── Jinx.blend
+├── references/
+│   ├── design.png
+│   ├── turnaround.png
+│   ├── head.png
+│   ├── body.png
+│   ├── hair.png
+│   └── views/
+│       ├── turnaround/{front,left,back,right}.png
+│       ├── head/{front,left,back,right}.png
+│       ├── body/{front,left,back,right}.png
+│       └── hair/{front,left,back,right}.png
+├── project.json
+└── README.md
+```
+
+`.blend` 内包含选中的三个部件与已生成的贴图。参考图只包含所选模型对应的版本；部件裁切图使用该候选实际提交的不可变输入快照。`project.json` 记录所选模型和参考图的对应关系，不导出编辑消息、AI 检查历史或密钥。
+
+**Export component** 单独下载 `项目名_head.blend`、`项目名_body.blend` 或 `项目名_hair.blend`。白模也可导出，贴图和最终确认不是导出的前提。
+
+导出服务后台运行 Blender、打包纹理并保存真实 `.blend`；用户无需再运行导入脚本。保存窗口在支持的浏览器中可选择位置，其他浏览器使用默认下载方式。旧的模型＋导入脚本 ZIP 接口仅保留兼容用途，不是当前项目导出按钮的交付形式。
+
+## 技术设计与 Agent 的职责
+
+- **OpenAI 图片服务**：整体设计、四视图和部件参考的生成与修订。
+- **视觉检查模型**：结合部件图与整体参考输出结构问题建议。当前默认配置为 `gpt-5-mini`，可通过 `OPENAI_REVIEW_MODEL` 更改。
+- **项目上下文**：保存角色身份、当前批准参考、依赖、反馈及不可变模型输入快照，避免把不同版本混在一起。
+- **Tripo P2.0**：当前几何配置为 `P2-20260801`；输入顺序为 front、left、back、right，四张图分别上传，不把四宫格当作单张输入。
+- **几何与材质分离**：始终请求 `quad=true`；Head 目标 5,000 面，Body/Hair 各 20,000 面。这些是请求设置，实际面数及四边形比例需要检查原始文件。
+- **贴图**：使用独立纹理模型 `v3.5-20260815`、`detailed` 和 PBR。4K 是目标；当前 Jinx 实测为 4096×4096，不代表未来每次输出都保证该分辨率。
+- **预览与导出**：Three.js 提供白模、原始材质、双面显示和线框。网页渲染会三角化，不能据此判定原始 FBX 的四边形拓扑。Blender 在服务端生成并缓存可携带贴图的场景文件。
+
+Agent 能力主要体现在基于参考和生成结果进行结构判断，并把判断融入修订。并行调度、裁切、状态管理和打包属于工程自动化。当前是 **人工参与的 AI 工作流**，不是自主完成建模、组装和绑定的通用 Agent。核心贡献是可用的工作流与可追溯交付，而不是训练新的生成模型。
+
+## 计划中的 baseline 与评估
+
+以下是待执行实验，尚无已完成的对照结果。研究问题是：**把角色拆成部件生成，是否比整体一次生成更贴近参考、更少结构问题，并更方便后续编辑？**
+
+| 方案 | 输入与流程 | 要检验的内容 |
+|---|---|---|
+| Baseline：整体直接生成 | 同一组批准的整体四视图，裁成四张独立图片，直接调用 Tripo 生成完整角色 | 现有生成服务的直接使用效果 |
+| 我们的流程：部件生成 | 从同一整体四视图生成部件参考，分别生成 Head、Body、Hair，导出同一 Blender 场景 | 部件拆分、参考管理和工作流的总体价值 |
+| 补充消融：无 AI 检查 | 使用同样的部件流程，但不向修订加入 AI 结构检查建议 | AI 检查能否改善结果或减少人工反馈 |
+
+### 公平比较规则
+
+- 固定相同角色设计、整体四视图、Tripo 几何版本和四边形要求。双方都按接口要求上传四张独立图，不能让 baseline 只使用一张四宫格。
+- 区分两类证据：先检查生成原始输出，再比较经过相同人工修整时间或相同外部 Codex 预算后的结果。我们的组装与精修也必须计入。
+- 报告图片、视觉检查、几何、贴图及重试的全部调用成本，同时记录人工时间、等待时间、候选数量和成功率。
+- 部件方案的总目标面数为 45,000。整体模型的可用面数受对应 API 限制；报告双方请求和实际面数，不能默认它们相同。能在接口限制内实现预算匹配时，再做额外控制实验。
+- 主实验允许工作流投入不同，但结论应表达为质量／编辑便利性与额外成本的权衡，不能据此声称同成本必然更好。
+- 首轮计划使用 3–5 个不同复杂度的角色；预算允许时重复生成，避免只展示一个最好的随机结果。保留失败案例，不把小样本结果包装成普遍结论。
+
+### 建议指标
+
+1. **参考一致性**：脸、发型、服装、配色及多个视角的一致性。预先制定评分标准，由不知方案标签的评审评分。
+2. **结构问题**：缺失、粘连、穿插、头发残留解剖结构及头颈衔接问题；图片检查和真实模型检查分开记录。
+3. **可编辑性**：完成头发替换、头部调整等指定任务的耗时、操作数和影响范围。
+4. **交付可靠性**：项目包能否解压，`.blend` 能否打开，贴图是否嵌入，模型与参考版本是否一致。
+5. **成本与效率**：每角色实际费用、重试次数、人工修整时间和端到端等待时间。
+
+直接生成对照主要检验部件策略，不单独证明 Agent 的增益。无 AI 检查的消融用于检验判断环节。自动测试用于检查软件行为，也不能替代上述资产效果评估。
+
+## 后续开发方向
+
+按优先级推进，先验证价值，再扩大范围：
+
+1. **收敛 demo、补实验**：完成 baseline、失败记录、实际费用与组装时间统计；准备完整演示和备用录像。
+2. **拆清数据与服务边界**：把项目记忆、图片生成、视觉检查、模型生成、预览和导出进一步模块化，整理明确的版本依赖与测试。
+3. **改进参考与接口一致性**：检查四视图比例、表情、颈部截面和头发隔离；降低拼接时需要的手动调整。
+4. **强化检查与候选选择**：验证视觉检查准确性，再尝试有限次数的检查—修订闭环或多候选排序。保留人工接管，先设置费用与重试上限。
+5. **改善交付与使用体验**：清晰的成本和任务状态、取消/失败提示、导出进度、跨系统部署与服务端 Blender 配置。
+6. **需要时再产品化**：用户认证、项目隔离、文件配额、队列、数据清理和隐私说明。目前仅面向本地开发与课程 demo。
+
+暂不承诺自动绑定、生产级拓扑、大规模角色工厂或软件内置 Codex。后续是否开发简单对齐辅助，应由 baseline 中的组装负担和用户反馈决定。
+
+## 本地启动
+
+需要 Python 3.13+、uv、Node/npm。原生 `.blend` 导出还需要 **运行后端的机器**安装 Blender；下载资产的客户端不需要安装 Blender，打开文件时才需要。
 
 ```bash
 uv sync --locked
+npm ci
 uv run uvicorn --app-dir src asset_factory.studio:create_app --factory --host 127.0.0.1 --port 8765
 ```
 
-打开 <http://127.0.0.1:8765>。使用单个服务进程，不要开启多个 worker；关闭终端服务后页面将不可用。
+打开 <http://127.0.0.1:8765>。使用单个服务进程，不要开启多个 worker。
 
-## 当前可用流程
-
-1. 创建角色，填写设计，或者上传已有整体参考。
-2. 整体设计支持「文字生成」和「已有图像生成」；后者可上传初始图或使用当前版本。检查结果后确认。
-3. 生成四视图，指出不一致的地方，检查并确认。
-4. 按顺序准备头部、身体与服装、头发参考。
-5. 用快速画笔圈画或框选问题区域，填写修改意见，并可上传最多 3 张修改参考图片，一起生成新版本；旧版本保留。
-   文字生成只使用文字；需要图片引导时切换已有图像生成。上传初始图或修改参考不等于确认设计，也不会直接覆盖设计图。
-6. 确认各步骤，下载图片与记录组成的 ZIP 参考包。
-
-左侧按整体设计 → 四视图 → 头部 → 身体与服装 → 头发顺序解锁。确认当前图后自动进入下一步，已完成步骤可以返回；未完成步骤不能跳过。上游图片变更会使所有后续参考过期并重新锁定。下载允许未完成的任务，但清单会注明是否全部确认。
-
-未配置 OpenAI 时默认使用 **本地交互演示**：回放仓库已有参考图，不进行真正的 AI 生成或修改。它用于验证用户操作、反馈记录和确认流程。配置 OpenAI 后，新角色默认使用 OpenAI API；已有演示角色仍保持演示模式。
-
-## 真实图片服务
-
-配置本目录 `.env`（已有文件请编辑，不要覆盖）：
+在本目录创建或编辑 `.env`；已有文件不要覆盖，变量示例见 [.env.example](.env.example)：
 
 ```dotenv
-OPENAI_API_KEY=你的API密钥
+OPENAI_API_KEY=
 OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
-TRIPO_API_KEY=你的Tripo密钥
-TRIPO_MODEL_VERSION=v3.1-20260211
+OPENAI_REVIEW_MODEL=gpt-5-mini
+TRIPO_API_KEY=
+TRIPO_MODEL_VERSION=P2-20260801
+BLENDER_BINARY=
 ```
 
-也兼容现有变量名 `ChatGPT_API_KEY` 和 `Tripo_AI_API_KEY`，无需改写已有密钥。
+图片模型名为当前开发配置，账号访问权限可能不同，可替换为账号可用模型。兼容 `ChatGPT_API_KEY` 和 `Tripo_AI_API_KEY`。`BLENDER_BINARY` 填写服务端 Blender 可执行文件路径；也支持自动发现本机常见及 Steam 安装位置。配置变更后重启服务。
 
-重启服务后，创建角色时会出现 OpenAI 选项。API 密钥只在服务端使用；真实请求会将角色描述和选用的参考图发送到 OpenAI。ChatGPT/Codex 订阅不等于本软件的 API 费用。
+没有图片密钥时仅能使用本地演示模式；它需要本机 `fixtures/` 样例，样例和生成资产不随源码提交，因此干净克隆不能假定自带可回放角色。
 
-当前每次请求生成一张 medium 图片：四视图 1536×1024，其余 1024×1536。有参考图时使用编辑接口；框选转换为与首张参考同尺寸的透明区域蒙版。局部编辑与多视角一致性仍须用户检查，不能保证框外像素完全不变。
+密钥只在服务端使用。当前开发模式不限制调用次数；图片、检查、3D 和贴图 API 均可能计费。确认整体四视图会自动启动部件参考生成，确认最后一个部件会自动启动三维任务。ChatGPT/Codex 订阅不能替代本软件的 API 账单。未知结果或中断任务不会自动重试，应先核对原任务。
 
-任务有调用次数上限，**不是美元预算上限**。记录供应商请求编号和返回的用量；实际美元费用未自动结算。生成超时或服务中断时不会自动重试，需要核对供应商记录。生产环境的身份认证和多用户服务尚未实现。
+## 已验证的范围与已知局限
 
-## 验证与文档
+截至 2026-10-04，45 项测试通过；Jinx 的真实流程及项目导出已验证。后台 Blender 5.2.2 成功重新打开流水线输出，确认三个网格和 12 张嵌入的 4K 贴图。项目 ZIP 的参考选择测试核对了导出裁切图与所选模型输入的字节一致性。
+
+这些结果证明流程可行，不等于多角色的质量保证。面数较高不必然改善脸部细节；提示词也不能保证四视图几何一致、无粘连或可绑定拓扑。单张正面截图不能替代完整三维检查。首次流程测试的用户报告消耗为 595 个 Tripo API 积分和 $0.43 OpenAI 费用，按 100 积分／美元折合 $6.38；这不是稳定的单角色生产成本，仍需核对账单并区分重试与开发调用。约 $3.5／角色是已被这次实测更新的早期估算。外部 Codex 的订阅费用分摊单独记录，计算假设见报告草稿。
+
+用户输入和选中的参考图会发送给相应模型供应商；部署前需处理权限、隐私与数据保留。角色参考的使用权限也需由项目成员确认。课程提交应披露实际 LLM 使用、外部模型和代码来源，并记录每位成员的贡献。
 
 ```bash
 uv run pytest -q
 uv run ruff check src tests
 ```
 
-目前 18 项自动测试通过，包含批准门槛、版本失效、重复提交、调用上限、未知结果阻塞、重启恢复、参考包导出、图片 API 的模拟请求、两个生成模式及图片参考的归属和数量校验。浏览器中验证了创建、样例展示、框选反馈、新版本与确认后进入四视图。
+生成图片、模型、项目数据库、导出文件、浏览器截图和 `.env` 均不纳入源码提交。必要样例应另行提供可授权访问的输入与复现说明。
 
-**已完成一次真实 OpenAI 出图测试**：2026-10-03，角色整体参考图，medium、1024×1536，一次请求成功，约 15 秒；返回 100 个输入 token 和 343 个输出 token。实际美元金额尚未核对账单。跨视图一致性和真实圈画修改效果还待实验。
+## 进一步阅读
 
-Tripo 密钥验证通过，API 钱包返回余额 0，因此没有提交真实三维任务。不要把 Tripo 网页订阅积分当成本软件已确认可用的 API 余额。
-
-- [参考图模块的实现与验证](docs/REFERENCE_STUDIO.md)
-- [软件架构与 Python 实现方案](docs/ARCHITECTURE.md)
+- [课程报告草稿与待完成实验](docs/PROJECT_REPORT.md)：英文草稿，区分现有证据、待执行 baseline、消融及开发优先级。
+- [实现与验证记录](docs/REFERENCE_STUDIO.md)：包含阶段性历史，当前行为以本 README 和代码为准。
+- [架构草案](docs/ARCHITECTURE.md)
 - [Python 与 uv 环境](ENVIRONMENT.md)
-- [已有 Blender 实验记录](../../docs/EXPERIMENTS.md)
-
-已有单角色 Blender 实验属于可行性证据，不等于本软件已验证完整批量流程；此前约 $3.5／角色仍是估算。
-
-画笔支持自由圈画、撤销一笔和清除标注。提交时，原图与红色标注图分别作为输入，并提示模型将圈画仅用作位置说明，不要把红线画进结果。标注图与笔迹记录随版本和参考包保存。
-
-## 当前开发范围：图片提示词调试
-
-先调清楚整体设计、四视图、头部、身体与服装、头发这五步，每一步经人工检查和确认后才继续。系统不自动跑完整流程。3D 暂停：没有真实三维任务提交记录。
-
-提示词独立放在 `prompts/`：`common.txt` 保存通用约束，其余五个文件分别保存步骤要求。页面可展开“本步骤生成规则”；出图记录中可展开“本次完整提示词”。每次请求保存模板版本、完整提示词、参考图编号和用户反馈，便于对比结果。
-
-当前使用 Images API，应用管理的通用约束、步骤要求和用户反馈合并为一个 prompt；并不是额外发送一个 system 消息。提示词只是初版，尚未完成逐步效果调优。
-
-真实测试项目：`真实 API 验证 · 白发角色`，已完成一次整体图出图，跨视图一致性与真实圈画修改仍待单独验证。后续不自动发起付费测试。
-
-
-### Browser 3D preview
-
-Install the pinned browser viewer dependency once with `npm ci`, then start the Python studio as usual. The component pages can preview local GLB files and saved API geometry results. Inspect and approve a saved candidate before using its GLB download or Blender-package export. The Blender ZIP contains a model, manifest and import script; run the script in Blender to save a `.blend`. This step imports and organizes the asset; character assembly and rigging remain separate.
-
-
-### Phase 4: parallel geometry generation
-
-Configure `TRIPO_API_KEY` (or `Tripo_AI_API_KEY`) on the backend. Approving the last of the three current component references automatically starts one untextured 3D task per component using its four saved Front / Left / Back / Right images and opens phase 4. These are paid API requests. Projects already fully approved before the update have a manual initial submission button. Refreshing reads saved status and does not submit again. Each result can be previewed, approved and exported; texture generation and assembly follow later.
-
-Current geometry settings request quad meshes (`quad=true`), with `face_limit=5000` for Head and `face_limit=20000` for Body & outfit and Hair. Texture, PBR and UV export are disabled. These are requested limits, not a guarantee of exact output counts; 20,000 is our project setting rather than the API's overall maximum. Smart low-poly is disabled because its quad mode only supports up to 10,000 faces.
-
-Tripo returns FBX for quad generation ([official generation API](https://platform.tripo3d.ai/docs/generation)). Original FBX files are preserved for download and Blender export. If local Blender is available, the app creates a separate GLB for browser viewing and records the original polygon counts before conversion; GLB triangulation does not change the saved FBX. Set optional `BLENDER_BINARY` to the Blender executable if it is not detected automatically. Without Blender, download and inspect the original FBX externally, then acknowledge inspection in the UI; preparing a preview again does not call Tripo or regenerate the model.
-
-### Component inspection pages and topology toggle
-
-Phase 4 provides separate Head, Body & outfit and Hair pages, accessible from the sidebar or component tabs. Each page lists only that part's saved candidates; this prepares the review UI for future multi-candidate generation, without creating extra paid jobs.
-
-The local Three.js inspector uses a dark background and lit white-model display. **Show topology edges** toggles visible mesh edges over the solid model; original materials and X-ray wire views are also available. Rotation, zoom and camera shortcuts remain supported. GLB edges are triangles, including triangulation of FBX preview copies, so this view must not be treated as the original FBX quad topology. No inspection display setting modifies the exported asset.
-
-### Four-view generation correction
-
-The initial geometry jobs used only the Front crop via `image_to_model`; those existing outputs are retained and labeled as single-view inputs. New standard batches use `multiview_to_model` with four separately uploaded crops in strict vendor order **front, left, back, right**, rather than uploading a four-panel sheet as one image ([official H3 API](https://docs.tripo3d.ai/model-generation/multiview-to-model-v3-0-v3-1.html)). Each operation saves immutable input snapshots and source view IDs. Missing views block submission. New request IDs distinguish this configuration from previous single-view jobs; refresh never regenerates them. The legacy manual crop endpoint remains explicitly single-view.
-
-34 tests pass, including the multiview payload order, input snapshot identity, quad/face settings and three-component concurrency. No new paid generation was used for this correction; improved output quality remains to be tested. Thumbnail/default camera presets were adjusted to show the current Tripo models' front. Detailed inspection supports left-drag orbit, scroll zoom and right-drag pan.
-
-### Required geometry policy
-
-Always generate quad meshes. The provider defaults to `quad=true` and rejects requests that disable it before making a network call. This applies to both multiview batches and manual single-image trials. GLB triangulation is only for browser display; preserve and export the original quad FBX. Do not downgrade to triangle generation to work around preview failures.
-
-### FBX preview without Blender
-
-Generated FBX files can now load directly in the browser through the local Three.js FBXLoader, including thumbnails and the detailed inspector. Blender is optional for preparing a derived GLB and measuring original polygon statistics. When no GLB exists, the preview route serves the original FBX and the frontend uses the FBX loader. Original files and quad generation settings remain unchanged; browser rendering triangulates faces internally, so rendered wireframe is not a measurement of original quad topology.
