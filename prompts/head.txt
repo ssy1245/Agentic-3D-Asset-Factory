@@ -1,0 +1,1 @@
+Create a separate bald head reference sheet: front, left profile, back and right profile, same facial identity and style as the character. Include ears and neck stub. Remove hair and clothing so head geometry is unambiguous. Plain background.

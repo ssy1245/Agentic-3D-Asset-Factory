@@ -1,0 +1,44 @@
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+data/
+
+# Local artwork, generated media, preview captures and exported assets.
+fixtures/
+artifacts/
+outputs/
+exports/
+screenshots/
+docs/*.png
+docs/*.jpg
+docs/*.jpeg
+docs/*.webp
+docs/*.gif
+*.blend
+*.blend1
+*.blend2
+*.glb
+*.gltf
+*.fbx
+*.sqlite3
+*.sqlite3-*
+*.log
+
+# One-off local experiments; these are not application entry points.
+scripts/live_smoke.py
+scripts/live_tripo_smoke.py
+scripts/split_grid_test.py
+
+# Local editor preferences and build outputs.
+.vscode/
+dist/
+build/
+*.egg-info/
