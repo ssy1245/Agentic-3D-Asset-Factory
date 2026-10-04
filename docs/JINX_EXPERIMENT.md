@@ -1,6 +1,6 @@
 # Jinx 实验：分件生成、装配与整体生成对照
 
-整理日期：2026-10-04。证据来自 `data/Readme_PIC/JINX/` 的八张结果图、`Jinx_report/` 的精修截图与检查记录，以及当日 Blender 当前场景。本文是单角色的定性案例分析，供报告和 presentation 使用。
+整理日期：2026-10-04。证据来自 `Readme_PIC/JINX/` 的八张结果图、`Readme_PIC/JINX/postprocess/` 的精修截图与检查记录，以及当日 Blender 当前场景。本文是单角色的定性案例分析，供报告和 presentation 使用。
 
 ## 实验目的与方法
 
@@ -10,11 +10,11 @@
 
 结果分为三个阶段：①应用交付的分件资产；②经过 Blender 尺度、位置、材质及接口调整后的装配结果；③进一步风格化与局部恢复的版本。后两阶段包含人工与外部 Codex 辅助处理，不能归为应用自动完成。现有记录没有把两条路线的随机种子、重试次数、累计费用和精修时间控制为一致，因此本实验用于比较可编辑性及具体视觉差异，不报告总体质量胜率或节省百分比。
 
-![角色设计](../data/Readme_PIC/JINX/design.png)
+![角色设计](../Readme_PIC/JINX/design.png)
 
 图 1：角色整体设计。蓝色长辫、黑白服装和粉蓝配色作为两条路线的视觉目标。
 
-![整体四视图](../data/Readme_PIC/JINX/turnaround.png)
+![整体四视图](../Readme_PIC/JINX/turnaround.png)
 
 图 2：整体四视图参考，用于约束正面、侧面和背面设计。
 
@@ -22,11 +22,11 @@
 
 ### 1. 三类资产可以独立生成并组成完整角色
 
-![应用输出的三个部件](../data/Readme_PIC/JINX/agent_output.png)
+![应用输出的三个部件](../Readme_PIC/JINX/agent_output.png)
 
 图 3：导入 Blender 的独立头部、身体与服装、头发。此阶段的位置和尺度还没有统一；图中的分离状态体现交付对象的独立性，不是装配失败。
 
-![装配后的完整角色](../data/Readme_PIC/JINX/after_assembly.png)
+![装配后的完整角色](../Readme_PIC/JINX/after_assembly.png)
 
 图 4：装配后的正面结果，保留完整 T-pose、服装配色和长辫轮廓。该结果验证了本案例的拆分方案可以组成完整静态角色。
 
@@ -34,11 +34,11 @@
 
 ### 2. 独立头部保留了更明确的五官与张嘴表情，但角色身份仍会漂移
 
-![分件装配的脸部](../data/Readme_PIC/JINX/assembly_face.png)
+![分件装配的脸部](../Readme_PIC/JINX/assembly_face.png)
 
 图 5a：分件装配结果的脸部近景。
 
-![整体生成 baseline 的脸部](../data/Readme_PIC/JINX/baseline_face.png)
+![整体生成 baseline 的脸部](../Readme_PIC/JINX/baseline_face.png)
 
 图 5b：整体生成 baseline 的脸部近景。
 
@@ -50,11 +50,11 @@
 
 ### 3. 独立头发提供明确的编辑边界，背面细节仍需修整
 
-![分件装配的背面](../data/Readme_PIC/JINX/assembly_back.png)
+![分件装配的背面](../Readme_PIC/JINX/assembly_back.png)
 
 图 6a：分件装配结果的背面。
 
-![整体生成 baseline 的背面](../data/Readme_PIC/JINX/baseline_back.png)
+![整体生成 baseline 的背面](../Readme_PIC/JINX/baseline_back.png)
 
 图 6b：整体生成 baseline 的背面。
 
@@ -66,12 +66,12 @@
 
 后续 Blender/Codex 处理记录包含头颈接缝填补、头皮颜色匹配、局部肤色恢复和辫子恢复。这说明导出资产可以继续修改，也揭示了分件路线额外承担的装配成本。
 
-`neck_seam_audit.json` 在一次接缝修复中记录：原有 5,305 个顶点未变、新增 27 个颈部顶点和 26 个封口面，脸部顶点位移为 0。`face_restoration_status.json` 记录该次恢复后头部与备份的位置差为 0；`skin_braids_restore_status.json` 记录恢复了 20,752 个辫子顶点。上述数字描述各次操作记录，不等于重新验证当前未保存场景中的全部数据，也不证明跨部件已完成流形焊接。
+[neck_seam_audit.json](../Readme_PIC/JINX/postprocess/neck_seam_audit.json) 在一次接缝修复中记录：原有 5,305 个顶点未变、新增 27 个颈部顶点和 26 个封口面，脸部顶点位移为 0。[face_restoration_status.json](../Readme_PIC/JINX/postprocess/face_restoration_status.json) 记录该次恢复后头部与备份的位置差为 0；[skin_braids_restore_status.json](../Readme_PIC/JINX/postprocess/skin_braids_restore_status.json) 记录恢复了 20,752 个辫子顶点。上述数字描述各次操作记录，不等于重新验证当前未保存场景中的全部数据，也不证明跨部件已完成流形焊接。
 
 可用于附录的后处理图片：
 
-- [颈部衔接正面](../../../Jinx_report/10_neck_seam_front.png)、[侧面](../../../Jinx_report/11_neck_seam_side.png)。
-- [辫子恢复后的全身](../../../Jinx_report/12_braids_restored.png)、[局部肤色恢复后的近景](../../../Jinx_report/13_skin_restored_detail.png)。
+- [颈部衔接正面](../Readme_PIC/JINX/postprocess/10_neck_seam_front.png)、[侧面](../Readme_PIC/JINX/postprocess/11_neck_seam_side.png)。
+- [辫子恢复后的全身](../Readme_PIC/JINX/postprocess/12_braids_restored.png)、[局部肤色恢复后的近景](../Readme_PIC/JINX/postprocess/13_skin_restored_detail.png)。
 
 这些渲染中皮肤高光较强，适合展示操作结果；脸部质量的主对照建议使用图 5 的视口截图，以减少曝光对判断的影响。Blender 当前打开的是 `Jinx_scalp_matched.blend`，窗口带未保存标记，因此上述保存截图不标为“当前最终版本”。
 
