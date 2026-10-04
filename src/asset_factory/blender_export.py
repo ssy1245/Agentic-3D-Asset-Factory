@@ -11,7 +11,7 @@ from .model_preview import blender_binary
 async def build_blend(models, destination, project_name):
     binary = blender_binary()
     if not binary:
-        raise RuntimeError("导出服务未找到 Blender，请配置 BLENDER_BINARY。")
+        raise RuntimeError("导出服务未找到 Blender,请配置 BLENDER_BINARY。")
     key = hashlib.sha256(json.dumps([
         "blend-export-v1", project_name,
         [(op["id"], path.stat().st_size, path.stat().st_mtime_ns) for op, path in models],
