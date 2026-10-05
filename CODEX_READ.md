@@ -21,9 +21,28 @@
 
 ## 先确定工作目录
 
-**当前应用根目录**是 `/Users/shangyishen/Desktop/model_v2/Agent/Agentic-3D-Asset-Factory/`。以下启动和测试命令均在这个目录运行。这里有独立 `.git`，修改前检查本仓库的状态，保留用户和其他会话已有改动。
+**仓库根目录**是克隆后的 `Agentic-3D-Asset-Factory/`，也就是包含 `README.md`、`AGENTS.md`、`pyproject.toml` 和 `src/` 的目录。本文中的代码、脚本和文档路径均相对于仓库根目录；启动和测试命令也在这里运行，不依赖开发者电脑上的目录结构。修改前检查本仓库状态，保留已有改动。
 
-外层 `/Users/shangyishen/Desktop/model_v2/` 是实验工作区，包含早期同名 `asset_factory/`、旧计划和 Blender 修复脚本。外层 README 与 `docs/DEVELOPMENT.md` 描述旧的离线原型，不能用它们判断当前网页应用是否已接入 API。尤其不要在外层运行同名 Python 模块后误以为启动了当前应用。
+```text
+Agentic-3D-Asset-Factory/
+├── AGENTS.md
+├── CODEX_READ.md
+├── README.md
+├── ENVIRONMENT.md
+├── pyproject.toml
+├── uv.lock
+├── package.json
+├── package-lock.json
+├── .env.example
+├── src/asset_factory/
+├── prompts/
+├── scripts/
+├── tests/
+├── docs/JINX_EXPERIMENT.md
+└── Readme_PIC/JINX/
+```
+
+开发者还保留有仓库外的旧原型和 Blender 实验资料。这些资料不是应用启动依赖，GitHub 克隆不会自动包含；它们的旧 README 和开发计划也不能用于判断当前应用状态。如果取得同名旧 `asset_factory/` 原型，应与本仓库 `src/asset_factory/` 区分，避免启动错误的模块。
 
 文档发生冲突时，先核对用户最新说明与实际代码。当前应用行为以本目录代码为准；实验事实以对应原始记录为准，文件时间或历史截图不证明当前 Blender 内存状态。
 
@@ -41,7 +60,7 @@
 | 三部件几何、候选选择、贴图 | 已实现；需要真实供应商配置 | `geometry.py`、`tripo.py` |
 | 浏览器模型预览、原始拓扑元数据 | 已实现；原始 FBX 与 GLB 预览分开 | `model_preview.py`、`web/mesh-viewer.js` |
 | 原生 `.blend` 和项目 ZIP 导出 | 已实现；后端需要 Blender | `blender_export.py`、`geometry.py` |
-| 完整组装、精修、绑定与动作 | 下游 Blender/Codex 案例；应用不自动完成 | 外层实验和 Blender 工程 |
+| 完整组装、精修、绑定与动作 | 下游 Blender/Codex 案例；应用不自动完成 | 另行提供的实验资料包，见下文 |
 
 ## 代码地图
 
@@ -81,7 +100,7 @@ uv run uvicorn --app-dir src asset_factory.studio:create_app --factory --host 12
 
 访问 `http://127.0.0.1:8765`，只使用一个服务进程，不开启多个 worker。启动前检查是否已有服务，不要为修改文档重启用户正在使用的服务。
 
-配置保存在本目录 `.env`，参考 `.env.example` 和 README。已有 `.env` 不要覆盖，不要打印或复制密钥到交接说明。当前代码的默认配置如下，账号权限和实际运行配置需另外核对：
+配置保存在本目录 `.env`，参考 `.env.example` 和 README。从 `.env.example` 创建本机 `.env`；已有 `.env` 不要覆盖，不要打印或复制密钥到交接说明。当前代码的默认配置如下，账号权限和实际运行配置需另外核对：
 
 | 配置 | 用途与当前代码默认值 |
 |---|---|
@@ -126,28 +145,35 @@ uv run ruff check src tests
 
 presentation 前的稳定性重点是：完整操作能走到导出；刷新与重复点击不重复付费；失败及未知状态有清楚的恢复路径；上游改动不会混用旧模型与新参考；原生 `.blend` 可打开且贴图可携带；Checker 或 Blender 缺失时已有成果仍保留。真实生成测试按用户授权范围进行，不为证明稳定性反复购买同一任务。
 
-## 实验素材和历史 Codex 工作
+## 仓库内的实验素材
 
-| 位置 | 内容及用途 |
+| 仓库相对路径 | 内容及用途 |
 |---|---|
-| 本目录 `docs/JINX_EXPERIMENT.md` | Jinx 分件、组装、整体生成对照、后处理及展示顺序。 |
-| 本目录 `Readme_PIC/JINX/` | Jinx 设计、参考、原始交付、组装和 baseline 截图；`postprocess/` 有修复图片与 JSON。 |
-| 外层 `docs/EXPERIMENTS.md` | 白发角色 E01–E08，包含原始组装对照、几何统计与精修/动画历史。 |
-| 外层 `reference2.png` | 白发双马尾角色参考。 |
-| 外层 `2D-girl report/2D-girl.blend` | 用户确认仅组装、未作其他调整的对照工程。 |
-| 外层 `2D-girl report/mesh_comparison.json` | 原始组装版本的网格统计。 |
-| 外层 `v2_soft_anime_trial.blend` | 白发角色精修、绑定、舞台和动作案例；操作前核对当前打开文件及未保存状态。 |
-| 外层 `docs/WHITE_HAIR_COMPARISON_INSPECT.json` | 较早精修场景检查，不能当作原始组装版的同一份统计。 |
-| 外层 `docs/BLENDER_HANDOFF.md` | Blender 操作偏好、对象与动作历史。日期较早，其中“唯一保留工程”等目录状态已过时，需要重新核对。 |
-| 外层 `material_repair/` | 背面串色、头发局部修复、检查与成本记录。 |
-| 外层 `shader_work/` | 风格化材质、相机和接地检查/修改历史。 |
-| 外层 `face_work/` | 表情、眨眼、局部动作修正及验证。 |
-| 外层 `nail_work/` | 指甲生成、调整与跟随检查。 |
-| 外层 `mmd_rebuild/` | 动作适配、稳定化与验证；历史脚本含特定骨架和坐标假设。 |
-| 外层 `dance_audit/` | 舞蹈抽帧、图片汇总、检查数据与报告。 |
-| 外层 `jinx_*.py` 与 `Jinx_report/` | Jinx 对齐、接口、肤色及辫子恢复的一次性操作和记录。 |
-| 外层 `asset_factory/`、`tests/test_workflow.py`、`examples/demo_job.json` | 旧的离线任务记录原型；不是当前网页应用。 |
-| 外层 `角色生成与装配计划_v1.6.md` | 旧路线，保留作历史资料；当前产品范围见应用 README。 |
+| `docs/JINX_EXPERIMENT.md` | Jinx 分件、组装、整体生成对照、后处理及展示顺序。 |
+| `Readme_PIC/JINX/` | Jinx 设计、参考、原始交付、组装和 baseline 截图；`postprocess/` 有修复图片与 JSON。 |
+
+## 可选的外部实验资料
+
+以下是开发期间积累的实验资料索引，**不包含在本仓库中，也不是可直接访问的仓库路径**。取得项目成员另行提供的资料包后，以该资料包根目录为起点查找下表文件；资料包可以存放在任意位置，不要求放在本仓库的父目录。缺少这些资料不影响阅读代码、运行软件测试或接手应用开发。
+
+| 资料包内的文件或目录 | 内容及用途 |
+|---|---|
+| `docs/EXPERIMENTS.md` | 白发角色 E01–E08，包含原始组装对照、几何统计与精修/动画历史。 |
+| `reference2.png` | 白发双马尾角色参考。 |
+| `2D-girl report/2D-girl.blend` | 用户确认仅组装、未作其他调整的对照工程。 |
+| `2D-girl report/mesh_comparison.json` | 原始组装版本的网格统计。 |
+| `v2_soft_anime_trial.blend` | 白发角色精修、绑定、舞台和动作案例；操作前核对当前打开文件及未保存状态。 |
+| `docs/WHITE_HAIR_COMPARISON_INSPECT.json` | 较早精修场景检查，不能当作原始组装版的同一份统计。 |
+| `docs/BLENDER_HANDOFF.md` | Blender 操作偏好、对象与动作历史；其中较早的目录状态需要重新核对。 |
+| `material_repair/` | 背面串色、头发局部修复、检查与成本记录。 |
+| `shader_work/` | 风格化材质、相机和接地检查/修改历史。 |
+| `face_work/` | 表情、眨眼、局部动作修正及验证。 |
+| `nail_work/` | 指甲生成、调整与跟随检查。 |
+| `mmd_rebuild/` | 动作适配、稳定化与验证；历史脚本含特定骨架和坐标假设。 |
+| `dance_audit/` | 舞蹈抽帧、图片汇总、检查数据与报告。 |
+| `jinx_*.py` 与 `Jinx_report/` | Jinx 对齐、接口、肤色及辫子恢复的一次性操作和记录。 |
+| `asset_factory/`、`tests/test_workflow.py`、`examples/demo_job.json` | 旧的离线任务记录原型；不是当前网页应用。 |
+| `角色生成与装配计划_v1.6.md` | 旧路线，保留作历史资料；当前产品范围见应用 README。 |
 
 历史 Blender 脚本通常依赖固定对象名、顶点编号、变换与帧号，部分带保存或场景重置操作。先检查脚本内容、适用对象与坐标空间，再决定是否复用；不要批量运行，也不要直接套到新角色上。操作用户当前 Blender 时通过 Computer Use 检查实际状态，保留用户已有修改，用户自行决定保存。应用的隔离后台资产导出与当前场景编辑是两种不同操作。
 
@@ -163,7 +189,7 @@ presentation 前的稳定性重点是：完整操作能走到导出；刷新与�
 2. **拆件语义偏移的建议展示**：沿用已有整体/部件双图检查，定位身份、轮廓、配色、装饰和风格偏移；将建议转成用户可查看、编辑的 prompt，由用户决定是否执行。无需为展示 Agent 而自动替用户改变角色审美。
 3. **稳定性与演示**：选择固定角色和可复现输入，展示一次真实检查与修订闭环，并覆盖项目导出。保留阶段结果，准备完整流程备用录像；区分现场运行与已有结果回放。
 
-整体直接生成对照用于展示拆件策略；它不能单独证明 Checker 的增益。新增功能完成后同步更新 README、本文件、接口和测试，避免演示陈述领先于代码。Track 2 的报告、演示和代码交付要求以用户提供的 `/Users/shangyishen/Desktop/DASC7606C_Group_Project_0921.pdf` 为准。
+整体直接生成对照用于展示拆件策略；它不能单独证明 Checker 的增益。新增功能完成后同步更新 README、本文件、接口和测试，避免演示陈述领先于代码。Track 2 的报告、演示和代码交付要求以课程作业说明 `DASC7606C_Group_Project_0921.pdf` 为准；该 PDF 由课程另行提供，不包含在本仓库中。
 
 ## 不能漏掉的工程约束
 
