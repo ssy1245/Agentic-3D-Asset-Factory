@@ -1,5 +1,7 @@
 # Project constraints
 
+- For project onboarding, read `CODEX_READ.md` and `README.md` in this application directory. The outer `model_v2` directory contains an older same-named prototype and historical Blender work; do not confuse them with the current application.
+
 - All generated 3D models must request quad meshes (`quad=true`). Never fall back to triangle generation.
 - Head targets 5,000 faces; Body & outfit and Hair target 20,000 faces. Generate geometry before materials.
 - Standard component generation uses four separate approved images in Tripo order front, left, back, right. Do not silently use only Front.
