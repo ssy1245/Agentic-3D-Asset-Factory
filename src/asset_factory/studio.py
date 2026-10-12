@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Annotated
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .auth import attach_auth
 from .geometry import attach_geometry
 from .models import GenerateRequest, Stage
 from .prompts import prompt_templates
@@ -106,6 +107,7 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
         await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(title="Reference Studio", lifespan=lifespan)
+    attach_auth(app, store)
     viewer_dist = ROOT / "node_modules" / "@google" / "model-viewer" / "dist"
     app.mount("/viewer-assets", StaticFiles(directory=viewer_dist, check_dir=False), name="viewer-assets")
     app.mount(
@@ -223,14 +225,15 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
         return prompt_templates()
 
     @app.get("/api/projects")
-    def projects():
+    def projects(request: Request):
         return [
             {"id": p["id"], "name": p["name"], "provider": p["provider"], "created_at": p["created_at"]}
-            for p in store.projects()
+            for p in store.projects(request.state.user["id"])
         ]
 
     @app.post("/api/projects")
     def create(
+        request: Request,
         name: str = Form(..., min_length=1, max_length=100),
         brief: str = Form("", max_length=6000),
         provider: str = Form("demo"),
@@ -239,6 +242,7 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
             raise HTTPException(400, "该出图服务尚未配置")
         project = {
             "id": identity(),
+            "owner_id": request.state.user["id"],
             "name": name,
             "brief": brief,
             "provider": provider,

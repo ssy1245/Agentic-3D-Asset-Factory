@@ -45,3 +45,6 @@ build/
 
 # Reinstall browser viewer dependencies with npm ci.
 node_modules/
+
+# Local implementation scratch, test databases and preview assets.
+/work/

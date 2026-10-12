@@ -21,6 +21,12 @@ class Store:
         self.database = root / "studio.sqlite3"
         with self.connect() as db:
             db.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS operations (
                     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -31,6 +37,10 @@ class Store:
                 CREATE UNIQUE INDEX IF NOT EXISTS one_active_operation_per_stage_and_texture ON operations(project_id, json_extract(data, '$.stage'), coalesce(json_extract(data, '$.texture'), 0))
                 WHERE status IN ('queued','running','unknown');
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
+            if "owner_id" not in columns:
+                db.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT REFERENCES users(id)")
+            db.execute("CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_id)")
 
     @contextmanager
     def connect(self):
@@ -44,7 +54,10 @@ class Store:
 
     def create(self, project):
         with self.connect() as db:
-            db.execute("INSERT INTO projects VALUES (?,?)", (project["id"], json.dumps(project)))
+            db.execute(
+                "INSERT INTO projects (id,data,owner_id) VALUES (?,?,?)",
+                (project["id"], json.dumps(project), project.get("owner_id")),
+            )
 
     def get(self, pid, db=None):
         if db is None:
@@ -58,10 +71,18 @@ class Store:
     def put(self, db, project):
         db.execute("UPDATE projects SET data=? WHERE id=?", (json.dumps(project), project["id"]))
 
-    def projects(self):
+    def projects(self, owner_id):
         with self.connect() as db:
-            rows = db.execute("SELECT data FROM projects ORDER BY rowid DESC").fetchall()
+            rows = db.execute(
+                "SELECT data FROM projects WHERE owner_id=? ORDER BY rowid DESC", (owner_id,)
+            ).fetchall()
         return [json.loads(r["data"]) for r in rows]
+
+    def owns(self, pid, user_id):
+        with self.connect() as db:
+            return db.execute(
+                "SELECT 1 FROM projects WHERE id=? AND owner_id=?", (pid, user_id)
+            ).fetchone() is not None
 
     def operations(self, pid, db=None):
         if db is None:

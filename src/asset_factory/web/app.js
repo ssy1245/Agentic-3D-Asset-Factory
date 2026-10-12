@@ -23,7 +23,7 @@ function renderApprovalAction(r,active,operations){
 }
 async function api(path, options={}) {
   const response=await fetch(path,options);
-  if(!response.ok){const error=await response.json().catch(()=>({}));const failure=new Error(typeof error.detail==='string'?error.detail:'输入不完整或请求失败，请检查填写内容。');failure.httpStatus=response.status;throw failure;}
+  if(!response.ok){if(response.status===401)window.showStudioLogin();const error=await response.json().catch(()=>({}));const failure=new Error(typeof error.detail==='string'?error.detail:'输入不完整或请求失败，请检查填写内容。');failure.httpStatus=response.status;throw failure;}
   return response.json();
 }
 const jsonOptions = body => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -361,4 +361,6 @@ $('boxTool').onclick=()=>{annotationTool='box';render();drawSelection();};
 $('undoStroke').onclick=()=>{brushStrokes.pop();drawSelection();};
 $('clearSelection').onclick=resetRegion;$('referenceImage').onload=drawSelection;new ResizeObserver(drawSelection).observe($('imageWrap'));
 async function start(){try{config=await api('/api/config');promptTemplates=await api('/api/prompts');if(config.providers.includes('openai'))$('provider').add(new Option('OpenAI API · 付费出图','openai'));if(config.tripo_configured)api('/api/services/tripo/balance').then(wallet=>{tripoWallet=wallet;render();}).catch(e=>say(e.message));const list=await loadProjects();const remembered=localStorage.getItem('reference-project');if(list.length)await loadProject(list.find(p=>p.id===remembered)?.id||list[0].id);else render();}catch(e){say(e.message);}}
-setInterval(()=>{if(project)refresh().catch(e=>say('连接暂时中断；恢复后会继续读取任务状态。'));},2000);start();
+setInterval(()=>{if(window.studioUser&&project)refresh().catch(e=>say('连接暂时中断；恢复后会继续读取任务状态。'));},2000);window.studioAuthReady.then(start);
+
+window.addEventListener('studio-session-ended',()=>{project=null;selected=null;for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();});

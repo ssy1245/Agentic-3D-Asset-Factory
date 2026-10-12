@@ -1,7 +1,25 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reference Studio · 角色参考工作室</title><link rel="stylesheet" href="/static/style.css?v=selected-handoff-1"><script type="importmap">{"imports":{"three":"/three-assets/build/three.module.js","three/addons/":"/three-assets/examples/jsm/"}}</script></head>
-<body>
-<header><a class="brand" href="/">◈ <span>Reference Studio</span></a><span class="header-note">角色参考工作室</span><select id="languageSwitch" aria-label="Language / 语言"><option value="zh">中文</option><option value="en">English</option></select><button class="ghost" id="newProject">＋ 新角色</button></header>
+<body class="account-locked">
+<header><a class="brand" href="/">◈ <span>Reference Studio</span></a><span class="header-note">角色参考工作室</span><select id="languageSwitch" aria-label="Language / 语言"><option value="zh">中文</option><option value="en">English</option></select><span id="accountName" class="account-name"></span><button class="ghost" id="logoutButton" hidden>退出登录</button><button class="ghost" id="newProject">＋ 新角色</button></header>
+<section id="accountPanel" class="account-panel" aria-labelledby="accountTitle">
+  <div class="account-card">
+    <div class="eyebrow">YOUR CHARACTER WORKSPACE</div>
+    <h1 id="accountTitle">登录角色工作室</h1>
+    <p class="muted">保存你的角色设计、参考图和生成记录，登录后继续创作。</p>
+    <form id="accountForm">
+      <label for="accountUsername">用户名</label>
+      <input id="accountUsername" name="username" autocomplete="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9_-]+" placeholder="3–40 位字母、数字、下划线或短横线">
+      <label for="accountPassword">密码</label>
+      <input id="accountPassword" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="至少 12 个字符">
+      <p id="accountError" class="error" role="alert"></p>
+      <button id="accountSubmit" class="primary full" type="submit">登录</button>
+    </form>
+    <button id="accountToggle" class="text-button full" type="button">没有账号？创建账号</button>
+    <p class="muted small">每个账号拥有自己的项目。历史项目保留，需由本机管理员分配。</p>
+  </div>
+</section>
+
 <div class="shell">
 <aside class="sidebar"><div class="eyebrow">YOUR CHARACTERS</div><select id="projects" aria-label="选择角色"></select><h2 id="projectName">开始一个新角色</h2><p class="muted">确认设计与四视图后，头部、身体和头发并行准备。</p><nav id="steps" aria-label="参考图步骤"></nav><div id="serviceStatus" class="mode-card" style="margin-top:24px"></div><div class="sidebar-bottom"><span class="dot"></span> 每次修改都保留版本<p>上游设计变更后，下游参考会标记为待更新。</p></div></aside>
 <main>
@@ -16,4 +34,4 @@
 </main></div>
 <dialog id="modelDialog" class="model-dialog"><div class="dialog-top"><h2 id="modelTitle">3D 模型预览</h2><button id="closeModel" class="ghost" type="button">关闭</button></div><p id="modelStatus" class="muted" role="status"></p><mesh-inspector id="modelViewer"></mesh-inspector><div class="model-display-modes" id="modelDisplayModes" role="group" aria-label="模型显示模式"><button type="button" data-model-mode="clay" aria-pressed="true">白模形状</button><button type="button" data-model-mode="material" aria-pressed="false">原始材质</button><label class="topology-toggle"><input type="checkbox" id="modelDoubleSided" checked>双面显示</label><label class="topology-toggle"><input type="checkbox" id="modelTopologyToggle" role="switch">显示拓扑线</label><button type="button" data-model-mode="xray" aria-pressed="false">透视线框</button></div><p class="muted small">双面显示可查看发片背面；关闭可检查面朝向，不会修复缺面或修改原模型。</p><p class="muted small">网页线框显示渲染时的三角网格；原始 FBX 的四边形拓扑请在 Blender 核对。透视线框用于观察遮挡后的网格，不代表已有骨骼绑定。</p><div class="model-camera-buttons" id="modelCameraButtons"><button type="button" data-model-orbit="90deg 90deg auto">正面</button><button type="button" data-model-orbit="180deg 90deg auto">侧面 A</button><button type="button" data-model-orbit="-90deg 90deg auto">背面</button><button type="button" data-model-orbit="0deg 90deg auto">侧面 B</button><button id="resetModelCamera" type="button">重置视角</button></div><p class="muted small">鼠标左键拖动自由旋转，滚轮缩放，右键拖动平移。请检查完整性、缺失部件、穿插和材质；网页预览不能证明拓扑适合绑定。</p><p id="modelInfo" class="muted small"></p><div class="model-export-actions"><button id="regenerateModel" class="secondary" type="button">重新生成白模</button><button id="viewTextureResult" class="secondary" type="button" hidden>查看贴图结果</button><button id="approveModel" class="primary" type="button">检查完成，确认此模型</button><a id="saveModel" class="secondary disabled" href="#">下载 GLB 到本地</a><a id="exportBlender" class="secondary disabled" href="#">导出此部件</a></div><p id="modelExportNote" class="muted small">确认后可导出。Blender 文件包包含模型和导入脚本，不会自动拼接或绑定。</p></dialog>
 <dialog id="viewDialog"><button id="closeView" class="ghost" type="button">关闭</button><h2 id="viewTitle"></h2><img id="viewLarge" alt="放大视图"><p>需要修改时，返回原图圈画，并在修改意见中注明此视图。</p></dialog><dialog id="createDialog"><form id="createForm"><div class="dialog-top"><div><div class="eyebrow">NEW CHARACTER</div><h2>创建一个角色</h2></div><button type="button" id="closeDialog" class="text-button">关闭</button></div><label for="name">角色名称</label><input id="name" required maxlength="100" placeholder="例如：星光女仆"><label for="brief">角色设计（选填）</label><textarea id="brief" maxlength="6000" rows="5" placeholder="描述角色的风格、发型、服装、配色和需要保留的细节。"></textarea><div class="form-row"><div><label for="provider">出图方式</label><select id="provider"><option value="demo">本地交互演示 · 不调用 AI</option></select></div></div><p class="muted small" id="providerHelp">演示模式读取已有样例图，用来测试上传、反馈与确认流程；不会真正生成或修改图片。</p><label for="initialImage">已有整体参考（可选）</label><input id="initialImage" type="file" accept="image/png,image/jpeg,image/webp"><p id="createError" class="error"></p><button class="primary full" type="submit" id="createSubmit">进入参考工作室 →</button></form></dialog>
-<script src="/static/models.js?v=selected-handoff-1"></script><script src="/static/app.js?v=title-baseline-2"></script><script src="/static/i18n.js?v=selected-handoff-1"></script></body></html>
+<script src="/static/models.js?v=selected-handoff-1"></script><script src="/static/auth.js?v=accounts-1"></script><script src="/static/app.js?v=accounts-1"></script><script src="/static/i18n.js?v=selected-handoff-1"></script></body></html>

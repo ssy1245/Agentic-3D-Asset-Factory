@@ -7,12 +7,26 @@ import zipfile
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as BaseTestClient
 from PIL import Image, ImageDraw
 
 from asset_factory.models import Region
 from asset_factory.provider import OpenAIProvider, ProviderError, Result, region_mask
 from asset_factory.studio import create_app
+
+
+class TestClient(BaseTestClient):
+    """Existing workflow tests now exercise the authenticated application."""
+    __test__ = False
+
+    def __enter__(self):
+        super().__enter__()
+        credentials = {"username": "workflow", "password": "workflow-password-123"}
+        response = self.post("/api/auth/register", json=credentials)
+        if response.status_code == 409:
+            response = self.post("/api/auth/login", json=credentials)
+        assert response.status_code in (200, 201), response.text
+        return self
 
 
 def png():
@@ -66,7 +80,8 @@ def submit(c, pid, stage="design", **fields):
 
 
 def finished(c, pid):
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         p = c.get(f"/api/projects/{pid}").json()
         if not any(o["status"] in ("queued", "running") for o in p["operations"]):
             return p
@@ -726,9 +741,10 @@ def test_default_app_disables_3d_even_with_key(tmp_path, monkeypatch):
     with TestClient(create_app(tmp_path, {"demo": FakeProvider()})) as c:
         assert c.get("/api/config").json()["tripo_configured"] is False
         assert c.get("/api/services/tripo/balance").json() == {"configured": False}
+        pid = project(c)
         assert (
             c.post(
-                "/api/projects/unused/geometry",
+                f"/api/projects/{pid}/geometry",
                 json={
                     "stage": "head",
                     "source_revision": "unused",
