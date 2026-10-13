@@ -27,7 +27,7 @@ async function api(path, options={}) {
   return response.json();
 }
 const jsonOptions = body => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-function say(message){$('notice').textContent=message;}
+function say(message){const notice=$('notice');notice.textContent=message;if(message)window.studioMotion.swap(notice);}
 function pendingRequest(){try{return JSON.parse(localStorage.getItem('pending-generation-'+project?.id)||'null');}catch{return null;}}
 function current(){return project?.revisions.find(r=>r.id===project.current[stage]);}
 function shown(){return project?.revisions.find(r=>r.id===selected)||current();}
@@ -216,11 +216,50 @@ $('toggleSheet').onclick=()=>{sheetOpen=!sheetOpen;render();drawSelection();};
 $('closeView').onclick=()=>$('viewDialog').close();
 $('splitViews').onclick=async()=>{if(!shown()||busy)return;busy=true;render();try{await api(`/api/projects/${project.id}/revisions/${shown().id}/split`,{method:'POST'});await refresh();say('拆分结果已保存，请检查四个视图。');}catch(e){say(e.message);}finally{busy=false;render();}};
 async function refresh(){if(!project)return;const pid=project.id;const before=project.current[stage];const next=await api(`/api/projects/${pid}`);if(project?.id!==pid)return;if(selected===before||!selected)selected=next.current[stage]||null;project=next;const pending=pendingRequest();if(pending&&next.operations.some(o=>o.request_id===pending.request_id))localStorage.removeItem('pending-generation-'+project.id);render();}
-function showCreate(){$('provider').value=config?.default_provider||'demo';$('provider').onchange();$('createError').textContent='';$('createDialog').showModal();}
-$('newProject').onclick=showCreate;$('emptyCreate').onclick=showCreate;$('closeDialog').onclick=()=>$('createDialog').close();
+function showCreate(){if($('createDialog').open)return;$('provider').value=config?.default_provider||'demo';$('provider').onchange();$('createError').textContent='';$('createDialog').showModal();window.studioMotion.enter($('createDialog'));}
+let createPending=false;
+async function closeCreateDialog(){
+  const dialog=$('createDialog');
+  if(!dialog.open||dialog.dataset.closing)return;
+  dialog.dataset.closing='true';
+  try{await window.studioMotion.leave(dialog);dialog.close();}
+  finally{delete dialog.dataset.closing;}
+}
+$('newProject').onclick=showCreate;$('emptyCreate').onclick=showCreate;
+$('closeDialog').onclick=()=>{if(!createPending)closeCreateDialog();};
+$('createDialog').addEventListener('cancel',event=>{event.preventDefault();if(!createPending)closeCreateDialog();});
 $('provider').onchange=()=>{$('providerHelp').textContent=$('provider').value==='openai'?'点击出图会发送设计和参考图到 OpenAI，并产生 API 费用。开发阶段不限制次数，不会自动重试付费请求。':'演示模式读取已有样例图，用来测试上传、反馈与确认流程；不会真正生成或修改图片。';};
 $('projects').onchange=async()=>{try{await loadProject($('projects').value);say('');}catch(e){say(e.message);}};
-$('createForm').onsubmit=async event=>{event.preventDefault();$('createSubmit').disabled=true;try{const form=new FormData();form.set('name',$('name').value);form.set('brief',$('brief').value);form.set('provider',$('provider').value);const p=await api('/api/projects',{method:'POST',body:form});stage='design';await loadProject(p.id);if($('initialImage').files[0]){const upload=new FormData();upload.set('purpose','base');upload.set('image',$('initialImage').files[0]);await api(`/api/projects/${p.id}/references`,{method:'POST',body:upload});await loadProject(p.id);}await loadProjects();$('createDialog').close();$('createForm').reset();say('角色任务已创建。请先确认整体设计。');}catch(e){$('createError').textContent=e.message;}finally{$('createSubmit').disabled=false;}};
+$('createForm').onsubmit=async event=>{
+  event.preventDefault();
+  if(createPending)return;
+  createPending=true;
+  const button=$('createSubmit'),label=button.textContent;
+  button.disabled=true;$('closeDialog').disabled=true;
+  window.studioMotion.button(button,'pending','正在创建角色…');
+  $('createError').textContent='';
+  try{
+    const form=new FormData();
+    form.set('name',$('name').value);form.set('brief',$('brief').value);form.set('provider',$('provider').value);
+    const p=await api('/api/projects',{method:'POST',body:form});
+    stage='design';await loadProject(p.id);
+    if($('initialImage').files[0]){
+      const upload=new FormData();upload.set('purpose','base');upload.set('image',$('initialImage').files[0]);
+      await api(`/api/projects/${p.id}/references`,{method:'POST',body:upload});await loadProject(p.id);
+    }
+    await loadProjects();
+    window.studioMotion.button(button,'success','角色已创建');
+    await closeCreateDialog();
+    $('createForm').reset();
+    window.studioMotion.enter(document.querySelector('.stage-heading'));
+    window.studioMotion.enter($('imageWorkspace'));
+    say('角色任务已创建。请先确认整体设计。');
+  }catch(e){$('createError').textContent=e.message;window.studioMotion.error($('createForm'));}
+  finally{
+    createPending=false;button.disabled=false;$('closeDialog').disabled=false;
+    window.studioMotion.button(button,'idle',label);
+  }
+};
 $('generate').onclick=async()=>{
   if(busy||!project)return;
   const textOnly=stage==='design'&&designMode==='text';

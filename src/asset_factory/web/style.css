@@ -129,3 +129,39 @@ a[aria-busy="true"]{opacity:.65;cursor:wait}a[aria-busy="true"]::before{content:
 header #logoutButton{margin-left:0;white-space:nowrap}
 .account-locked .shell,.account-locked #newProject,.account-locked #languageSwitch{display:none}
 @media(max-width:650px){.account-card{padding:26px 22px}header{padding:0 18px;gap:12px}.account-name{max-width:100px;overflow:hidden;text-overflow:ellipsis}header .header-note{display:none}}
+
+/* Motion is reserved for deliberate actions; polling never replays entrances. */
+:root{--motion-ease:cubic-bezier(.22,1,.36,1)}
+button,.primary,.secondary,.ghost{transition:transform .2s var(--motion-ease),box-shadow .25s ease,background-color .2s ease,border-color .2s ease,opacity .2s ease}
+@media(hover:hover){.primary:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 7px 18px #315a4b26;background:#254d3e}.secondary:not(:disabled):hover,.ghost:not(:disabled):hover{transform:translateY(-1px);background:#f1f6f1}}
+button:not(:disabled):active{transform:translateY(1px) scale(.985)}
+input:not([type=file]),textarea,select{transition:border-color .2s ease,box-shadow .2s ease,background-color .2s ease}
+input:not([type=file]):focus,textarea:focus,select:focus{border-color:#729681;background:#fff;box-shadow:0 0 0 4px #315a4b0d}
+.account-panel{position:relative;isolation:isolate;overflow:hidden}
+.account-panel::before,.account-panel::after{content:"";position:absolute;z-index:-1;border-radius:50%;pointer-events:none;filter:blur(14px);animation:ambient-drift 14s ease-in-out infinite alternate}
+.account-panel::before{width:340px;height:340px;top:8%;left:calc(50% - 460px);background:radial-gradient(circle,#c9e2d47a,transparent 70%)}
+.account-panel::after{width:280px;height:280px;bottom:2%;right:calc(50% - 450px);background:radial-gradient(circle,#dfe7b994,transparent 70%);animation-delay:-7s}
+.account-card{animation:surface-arrive .65s var(--motion-ease) both;border-color:#dfe7df;box-shadow:0 24px 65px #233d3210}
+.account-card>.eyebrow{animation:content-arrive .5s .07s var(--motion-ease) both}
+.account-card>h1,.account-card>.muted{animation:content-arrive .5s .12s var(--motion-ease) both}
+.account-card>#accountForm,.account-card>#accountToggle{animation:content-arrive .5s .18s var(--motion-ease) both}
+.factory-emblem{position:relative;width:62px;height:58px;margin-bottom:22px;perspective:280px}
+.factory-emblem span{position:absolute;width:29px;height:29px;left:16px;top:12px;border:1px solid #719a83;border-radius:7px;background:linear-gradient(145deg,#f6fff9cc,#d5e6dcaa);box-shadow:0 5px 12px #315a4b0b;transform:rotate(-30deg) skew(8deg,8deg);animation:layer-float 5s ease-in-out infinite}
+.factory-emblem span:nth-child(1){top:24px;opacity:.45;animation-delay:-1.5s}
+.factory-emblem span:nth-child(2){top:12px;opacity:.7;animation-delay:-.75s}
+.factory-emblem span:nth-child(3){top:0;box-shadow:0 6px 18px #315a4b14}
+#createDialog{border:1px solid #dce6dd;border-radius:16px;box-shadow:0 28px 90px #15291c2e}
+#createDialog::backdrop{background:#13291f66;backdrop-filter:blur(5px);animation:backdrop-arrive .25s ease both}
+#createDialog .dialog-top{padding-bottom:8px;border-bottom:1px solid var(--line)}
+.create-spark{font-size:19px;line-height:1;vertical-align:-2px;color:var(--green);margin-right:6px}
+#createDialog form>label,#createDialog form>input,#createDialog form>textarea,#createDialog form>.form-row{animation:content-arrive .4s .05s var(--motion-ease) both}
+.submit-pending,.submit-success{display:flex;align-items:center;justify-content:center;gap:10px}
+.submit-pending:disabled{opacity:.85;cursor:wait}
+.submit-pending::before{content:"";width:14px;height:14px;border:2px solid #ffffff50;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+.submit-success::before{content:"✓";font-weight:700}
+@keyframes surface-arrive{from{opacity:0;transform:translateY(22px) scale(.975)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes content-arrive{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes backdrop-arrive{from{opacity:0}to{opacity:1}}
+@keyframes ambient-drift{from{transform:translate3d(-12px,0,0)}to{transform:translate3d(30px,-26px,0)}}
+@keyframes layer-float{0%,100%{transform:translateY(0) rotate(-30deg) skew(8deg,8deg)}50%{transform:translateY(-5px) rotate(-25deg) skew(8deg,8deg)}}
+@media(prefers-reduced-motion:reduce){button,.primary,.secondary,.ghost,input:not([type=file]),textarea,select{transition:none}.account-panel::before,.account-panel::after,.account-card,.account-card>.eyebrow,.account-card>h1,.account-card>.muted,.account-card>#accountForm,.account-card>#accountToggle,.factory-emblem span,#createDialog::backdrop,#createDialog form>label,#createDialog form>input,#createDialog form>textarea,#createDialog form>.form-row,.submit-pending::before{animation:none}.primary:not(:disabled):hover,.secondary:not(:disabled):hover,.ghost:not(:disabled):hover,button:not(:disabled):active{transform:none}}

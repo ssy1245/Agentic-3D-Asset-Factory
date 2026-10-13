@@ -21,7 +21,8 @@ class TestClient(BaseTestClient):
 
     def __enter__(self):
         super().__enter__()
-        credentials = {"username": "workflow", "password": "workflow-password-123"}
+        credentials = {"username": "workflow", "password": "workflow-password-123",
+                       "registration_pass": "test-registration-pass"}
         response = self.post("/api/auth/register", json=credentials)
         if response.status_code == 409:
             response = self.post("/api/auth/login", json=credentials)

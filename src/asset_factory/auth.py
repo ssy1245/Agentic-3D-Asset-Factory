@@ -29,6 +29,10 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class RegistrationCredentials(Credentials):
+    registration_pass: str = Field(default="", max_length=256)
+
+
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
     with HASH_SLOTS:
@@ -50,6 +54,12 @@ def token_hash(token):
 
 def attach_auth(app, store):
     secure = os.getenv("STUDIO_COOKIE_SECURE", "0") == "1"
+    # Backend-only allowlist; an empty configuration closes new registrations.
+    registration_passes = tuple(
+        token_hash(value.strip())
+        for value in os.getenv("STUDIO_REGISTRATION_PASSES", "").split(",")
+        if value.strip()
+    )
     # Single-process demo guard; deployment needs a shared edge/account rate limit.
     attempts = OrderedDict()
     attempt_lock = threading.Lock()
@@ -125,8 +135,16 @@ def attach_auth(app, store):
         return await call_next(request)
 
     @app.post("/api/auth/register", status_code=201)
-    def register(credentials: Credentials, request: Request, response: Response):
+    def register(credentials: RegistrationCredentials, request: Request, response: Response):
         rate_limit(request)
+        if not registration_passes:
+            raise HTTPException(403, "暂未开放注册，请联系管理员获取通行证。")
+        supplied_pass = token_hash(credentials.registration_pass.strip())
+        valid_pass = False
+        for allowed_pass in registration_passes:
+            valid_pass |= hmac.compare_digest(supplied_pass, allowed_pass)
+        if not valid_pass:
+            raise HTTPException(403, "通行证无效，请联系管理员获取有效通行证。")
         username = credentials.username.lower()
         uid = identity()
         encoded = password_hash(credentials.password)

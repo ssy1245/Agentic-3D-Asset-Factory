@@ -1,0 +1,43 @@
+# 密钥及本地环境
+.env
+.env.*
+**/.env
+**/.env.*
+.venv
+**/.venv
+.git
+.vscode
+.DS_Store
+
+# 宿主网页依赖必须在构建阶段用 npm ci 重新安装
+node_modules
+**/node_modules
+
+# 账号数据库、生成资产与演示素材都不打进镜像
+data
+fixtures
+artifacts
+outputs
+exports
+screenshots
+Readme_PIC
+work
+*.sqlite3
+*.sqlite3-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.blend
+**/*.blend1
+**/*.blend2
+**/*.fbx
+**/*.glb
+**/*.gltf
+
+# 测试与本地临时文件
+tests
+docs
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.pyc
+**/*.log

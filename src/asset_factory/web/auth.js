@@ -18,26 +18,41 @@ window.showStudioLogin = () => {
     el('accountSubmit').textContent = registering ? '创建账号并进入' : '登录';
     el('accountToggle').textContent = registering ? '已有账号？返回登录' : '没有账号？创建账号';
     el('accountPassword').autocomplete = registering ? 'new-password' : 'current-password';
+    el('accountPassLabel').hidden = !registering;
+    el('accountPassHint').hidden = !registering;
+    el('accountPass').hidden = !registering;
+    el('accountPass').disabled = !registering;
+    el('accountPass').required = registering;
+    if (!registering) el('accountPass').value = '';
     el('accountError').textContent = '';
+    window.studioMotion.swap(el('accountForm'));
   };
   el('accountForm').onsubmit = async event => {
     event.preventDefault();
     el('accountSubmit').disabled = true;
     el('accountToggle').disabled = true;
     el('accountError').textContent = '';
+    window.studioMotion.button(el('accountSubmit'), 'pending', registering ? '正在创建账号…' : '正在登录…');
     try {
+      const credentials = {username: el('accountUsername').value, password: el('accountPassword').value};
+      if (registering) credentials.registration_pass = el('accountPass').value.trim();
       const response = await fetch(`/api/auth/${registering ? 'register' : 'login'}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username: el('accountUsername').value, password: el('accountPassword').value})
+        body: JSON.stringify(credentials)
       });
       const result = await response.json();
       if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : '请检查用户名和密码格式。');
       el('accountPassword').value = '';
+      el('accountPass').value = '';
+      window.studioMotion.button(el('accountSubmit'), 'success', '已完成，即将进入');
+      await window.studioMotion.leave(el('accountPanel'));
       window.location.reload();
     } catch (error) {
       el('accountError').textContent = error.message;
+      window.studioMotion.error(el('accountForm'));
     } finally {
+      window.studioMotion.button(el('accountSubmit'), 'idle', registering ? '创建账号并进入' : '登录');
       el('accountSubmit').disabled = false;
       el('accountToggle').disabled = false;
     }

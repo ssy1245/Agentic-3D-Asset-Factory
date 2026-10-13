@@ -88,6 +88,10 @@ Agentic-3D-Asset-Factory/
 
 当前确认整体四视图会自动开始三部件参考生成，确认最后一个部件会自动开始三维生成。因此这些确认操作可能触发付费请求，不能在真实项目上当作无成本点击测试。
 
+## 注册访问控制
+
+注册接口要求 `registration_pass`，有效通行证通过后端 `STUDIO_REGISTRATION_PASSES` 管理（英文逗号分隔、区分大小写、忽略首尾空白）。未配置则关闭新注册；现有账号登录不受影响。当前通行证可重复使用，增删后重启服务生效。维护方式见 README 的“注册通行证”，不要把有效码写入前端或提交 Git。
+
 ## 启动和配置
 
 环境说明见 [ENVIRONMENT.md](ENVIRONMENT.md)。项目要求 Python 3.13+，当前 `.python-version` 为 3.13.15；使用 uv、Node/npm，后端原生导出还需要 Blender。
@@ -138,6 +142,8 @@ uv run ruff check src tests
 ```
 
 如果受限环境阻止 uv 访问缓存，而本地 `.venv` 已完整安装，可先使用 `.venv/bin/python -m pytest -q`；不要为了运行测试重装或覆盖用户环境。
+
+普通测试通过 `tests/conftest.py` 隔离真实 Blender 发现与子进程启动，pytest 默认仅收集 `tests/`。不要让假 FBX 工作流测试调用本机 Blender，也不要收集 `scripts/` 中的历史实验；此前这会在受限环境触发 Metal 初始化崩溃及 macOS “Blender 意外退出”弹窗。真实 Blender 集成验证与单元测试分开进行，保留用户工程与生成资产。
 
 `tests/test_studio.py` 主要覆盖阶段依赖、重复请求、重启与未知状态、上传和圈画、部件并发、Checker 失败保留图片、建议与用户反馈合并、Tripo 请求契约、四边形和四视图输入、候选与贴图关系、预览和导出。供应商主要使用 fake/mock；文件中带历史命名的测试不应单独替代当前实现判断。
 
