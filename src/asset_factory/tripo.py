@@ -8,6 +8,7 @@ from PIL import Image
 
 from .models import Region
 from .provider import ProviderError
+from .runtime import require_real_calls
 
 
 class TripoProvider:
@@ -20,6 +21,7 @@ class TripoProvider:
             self.base = "https://openapi.tripo3d.ai/v3"
 
     async def request(self, method, path, **kwargs):
+        require_real_calls()
         try:
             async with httpx.AsyncClient(timeout=60, transport=self.transport) as client:
                 response = await client.request(
@@ -153,6 +155,7 @@ class TripoProvider:
         return await self.request("GET", ("/tasks/" if self.is_p2 else "/task/") + task_id)
 
     async def download(self, output, path: Path):
+        require_real_calls()
         url = output.get("base_model") or output.get("model") or output.get("model_url")
         if isinstance(url, dict):
             url = url.get("url")

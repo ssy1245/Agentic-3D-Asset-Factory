@@ -20,6 +20,7 @@ from .models import GenerateRequest, Stage
 from .prompts import prompt_templates
 from .provider import DemoProvider, OpenAIProvider, ProviderError, annotated_reference, normalize_image
 from .review import VisualReviewer
+from .runtime import load_test_enabled
 from .storage import Store, identity, now
 from .tripo import TripoProvider
 from .views import split_views
@@ -75,7 +76,14 @@ def invalidate(project, changed):
 def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
     default_providers = providers is None
     load_dotenv(ROOT / ".env")
-    store = Store(Path(data_dir) if data_dir else ROOT / "data")
+    load_test = load_test_enabled()
+    if load_test:
+        from .mock_providers import MockImageProvider, MockReviewer, MockSettings, MockTripo
+        settings = MockSettings()
+        providers = {"mock": MockImageProvider(settings)}
+        reviewer = MockReviewer(settings)
+        tripo = MockTripo(settings)
+    store = Store(Path(data_dir) if data_dir else ROOT / ("load-test-data" if load_test else "data"))
     if providers is None and reviewer is None:
         review_key = (
             os.getenv("OPENAI_API_KEY") or os.getenv("ChatGPT_API_KEY") or os.getenv("CHATGPT_API_KEY")
@@ -89,7 +97,7 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
             providers["openai"] = OpenAIProvider(
                 key, os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst")
             )
-    if default_providers and tripo is None:
+    if not load_test and default_providers and tripo is None:
         # Only the default app reads vendor credentials; injected providers stay isolated.
         tripo_key = (
             os.getenv("TRIPO_API_KEY") or os.getenv("Tripo_AI_API_KEY") or os.getenv("TRIPO_AI_API_KEY")
@@ -208,14 +216,20 @@ def create_app(data_dir=None, providers=None, tripo=None, reviewer=None):
     def home():
         return FileResponse(Path(__file__).parent / "web" / "index.html")
 
+    @app.get("/load-test/status")
+    def load_test_status():
+        return {"load_test": load_test, "external_api_calls": not load_test}
+
     @app.get("/api/config")
     def config():
         return {
             "providers": list(providers),
-            "default_provider": "openai" if "openai" in providers else "demo",
+            "default_provider": "mock" if load_test else ("openai" if "openai" in providers else "demo"),
+            "load_test": load_test,
+            "external_api_calls": not load_test,
             "tripo_configured": tripo is not None,
             "tripo_model": tripo.model if tripo else None,
-            "model": os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst"),
+            "model": "mock-local-image" if load_test else os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst"),
             "max_calls": None,
             "stages": LABELS,
         }

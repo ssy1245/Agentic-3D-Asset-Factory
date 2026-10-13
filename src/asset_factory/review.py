@@ -9,6 +9,8 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from .runtime import require_real_calls
+
 
 class Finding(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -30,6 +32,7 @@ class VisualReviewer:
         self.key, self.model, self.transport = key, model, transport
 
     async def review(self, stage, image, authority):
+        require_real_calls()
         rules = (Path(__file__).resolve().parents[2] / "prompts" / "component_review.txt").read_text()
         prompt = (
             rules

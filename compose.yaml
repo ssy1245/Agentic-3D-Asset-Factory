@@ -1,0 +1,33 @@
+services:
+  studio:
+    image: asset-factory:0.1
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # 私密配置仅在运行时注入，不放入镜像。
+    env_file:
+      - .env
+    environment:
+      BLENDER_BINARY: /opt/blender/blender
+    # 本机默认使用 8766，避免与已有的本地开发服务 8765 冲突。
+    ports:
+      - "127.0.0.1:${STUDIO_HOST_PORT:-8766}:8765"
+    volumes:
+      - studio-data:/app/data
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+
+volumes:
+  studio-data:

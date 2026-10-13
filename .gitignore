@@ -78,3 +78,7 @@ node_modules/
 *.key
 id_rsa
 id_ed25519
+
+# Isolated load-test databases and generated mock outputs.
+/load-test-data/
+/load-test-results/

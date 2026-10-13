@@ -8,6 +8,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageOps
 
 from .models import BrushStroke, Region
+from .runtime import require_real_calls
 
 
 class ProviderError(Exception):
@@ -96,6 +97,7 @@ class OpenAIProvider:
         self.transport = transport
 
     async def generate(self, stage, prompt, references, region=None):
+        require_real_calls()
         headers = {"Authorization": f"Bearer {self.key}"}
         request_id = None
         # No automatic retry: an image request can incur cost even on timeout.

@@ -1,0 +1,53 @@
+# Standalone configuration: do not merge with production compose.yaml.
+services:
+  studio-loadtest:
+    image: asset-factory:loadtest
+    platform: linux/amd64
+    build:
+      context: .
+    environment:
+      STUDIO_LOAD_TEST: "1"
+      STUDIO_REGISTRATION_PASSES: "load-test-local-only"
+      STUDIO_COOKIE_SECURE: "0"
+      STUDIO_MOCK_DELAY_MS: "${STUDIO_MOCK_DELAY_MS:-250}"
+      STUDIO_MOCK_FAILURE_RATE: "${STUDIO_MOCK_FAILURE_RATE:-0}"
+      BLENDER_BINARY: /opt/blender/blender
+    volumes:
+      - loadtest-data:/app/load-test-data
+    networks:
+      - offline
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+  # Only this fixed reverse proxy has a host-facing network. The application stays offline.
+  gateway:
+    image: caddy:2-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":80", "--to", "studio-loadtest:8765"]
+    ports:
+      - "127.0.0.1:8767:80"
+    networks:
+      - access
+      - offline
+    depends_on:
+      studio-loadtest:
+        condition: service_healthy
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  access:
+  offline:
+    internal: true
+volumes:
+  loadtest-data:

@@ -4,6 +4,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def registration_passes(monkeypatch):
     # Test-only allowlist; never depend on the developer's private .env.
+    monkeypatch.setenv("STUDIO_LOAD_TEST", "0")
     monkeypatch.setenv("STUDIO_REGISTRATION_PASSES", "test-registration-pass,second-test-pass")
 
 

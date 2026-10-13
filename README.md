@@ -282,6 +282,44 @@ BLENDER_BINARY=
 
 密钥只在服务端使用。当前开发模式不限制调用次数；图片、检查、3D 和贴图 API 均可能计费。确认整体四视图会自动启动部件参考生成，确认最后一个部件会自动启动三维任务。ChatGPT/Codex 订阅不能替代本软件的 API 账单。未知结果或中断任务不会自动重试，应先核对原任务。
 
+## Docker 本机运行
+
+仓库提供 `Dockerfile`、`.dockerignore` 和 `compose.yaml`。当前镜像包含 Linux x64 Blender 5.2.2，构建及运行平台为 `linux/amd64`，Apple Silicon 本机会使用架构模拟；云服务器部署前确认 CPU 架构。
+
+先在项目根目录准备私密 `.env`（保留已有文件），配置 API Key 和 `STUDIO_REGISTRATION_PASSES`；未配置通行证时新注册关闭。Compose 强制使用容器内的 Blender 路径，不修改本地开发的 Blender 设置。通过 HTTP 在本机运行时 `STUDIO_COOKIE_SECURE=0`，未来 HTTPS 部署再设为 1。
+
+```bash
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+默认访问 `http://127.0.0.1:8766`，端口仅绑定本机回环地址，不向公网发布；如端口冲突，可在 `.env` 设置 `STUDIO_HOST_PORT` 为其他可用端口。通过反向代理上线 HTTPS 需要另行配置。
+
+容器使用独立的 `studio-data` named volume 保存账号、SQLite、生成历史和模型。它不会自动导入本机现有 `data/`：首次运行账号及项目为空，需要重新注册；已有数据留在原处。需要迁移时先停止写入、备份并按文件所有权迁移，不能覆盖旧数据。容器用户 UID/GID 为 10001；未来改用宿主 bind mount 时需给该用户写入权限。
+
+```bash
+docker compose logs --tail=100 studio
+docker compose stop
+docker compose up -d
+```
+
+停止或重建容器不会删除 named volume；不要使用带 `-v` 的 down 或清理 volume 来重置账号。更新 `.env` 后使用下列命令重新创建容器，使新环境变量生效：
+
+```bash
+docker compose up -d --force-recreate
+```
+
+镜像不包含真实 `.env`、本机数据库、生成资产或 `fixtures/` 演示素材。没有供应商配置或演示素材时可以访问和登录页面，但不能据此认为生成流程已可用；如需要本地演示素材，应另行只读挂载。镜像构建会下载依赖，不会调用付费生成接口。
+
+2026-10-13 在 Apple Silicon Mac 的 Docker Desktop 上完成 `linux/amd64` 镜像构建与验证：容器 healthy，首页、认证脚本、动画脚本、Three.js/model-viewer 资源可访问，未登录 API 返回 401；一次性容器中的立方体完成 FBX→GLB 预览与原生 `.blend` 导出，原 FBX 不变且统计得到 6 个四边形。该验证未使用真实项目或付费供应商 API，不代表完整真实生成流程已验收。
+
+## 无真实 API 的压力测试模式
+
+已加入 `STUDIO_LOAD_TEST=1` 模式：图片、Checker、3D 与贴图均由本地 Mock 响应，真实调用入口另有拦截；使用独立数据目录，不回退到供应商。`compose.loadtest.yaml` 提供无真实 Key、独立卷、127.0.0.1:8767 和禁外网的专用环境。正式模式默认不变，不要在真实数据目录上开启压测。
+
+模拟延迟和失败率可配置，页面显示明确标记。Mock 资产仅用于测试，原生 Blender 导出在压测模式禁用。Locust 初始场景与分阶段操作见 [压测说明](loadtests/README.md)。
+
 ## 注册通行证（后端管理）
 
 新用户注册必须输入管理员提供的通行证；后端校验，不依赖前端页面限制。已有账号登录不需要通行证。

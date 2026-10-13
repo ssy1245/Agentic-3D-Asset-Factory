@@ -103,7 +103,8 @@ function render(){
   if(project&&!stepUnlocked(stage)){stage=Object.keys(labels).find(s=>stepUnlocked(s)&&!project.revisions.find(r=>r.id===project.current[s])?.approved)||'design';selected=project.current[stage]||null;resetRegion();feedbackImages=[];}
   const stageChanged=renderedStage!==stage;renderedStage=stage;
   $('promptPreview').textContent=promptTemplates[stage]?promptTemplates[stage].common+'\n\n'+promptTemplates[stage].instructions:'读取本步骤规则中…';
-  $('serviceStatus').textContent=`图片 API：${config?.providers.includes('openai')?'已配置':'未配置'}\n3D API：${config?.tripo_configured?'已配置':'未配置'}`;$('serviceStatus').style.whiteSpace='pre-line';
+  $('loadTestBanner').hidden=!config?.load_test;
+  $('serviceStatus').textContent=config?.load_test?'Mock 压测模式：真实 API 已禁用':`图片 API：${config?.providers.includes('openai')?'已配置':'未配置'}\n3D API：${config?.tripo_configured?'已配置':'未配置'}`;$('serviceStatus').style.whiteSpace='pre-line';
   $('projects').disabled=busy;$('newProject').disabled=busy;
   $('projectName').textContent=project?.name||'开始一个新角色';
   $('stageTitle').textContent=labels[stage];$('stageTitle').classList.toggle('model-stage-title',stage==='models');$('stageDesc').textContent=descriptions[stage];
@@ -228,7 +229,7 @@ async function closeCreateDialog(){
 $('newProject').onclick=showCreate;$('emptyCreate').onclick=showCreate;
 $('closeDialog').onclick=()=>{if(!createPending)closeCreateDialog();};
 $('createDialog').addEventListener('cancel',event=>{event.preventDefault();if(!createPending)closeCreateDialog();});
-$('provider').onchange=()=>{$('providerHelp').textContent=$('provider').value==='openai'?'点击出图会发送设计和参考图到 OpenAI，并产生 API 费用。开发阶段不限制次数，不会自动重试付费请求。':'演示模式读取已有样例图，用来测试上传、反馈与确认流程；不会真正生成或修改图片。';};
+$('provider').onchange=()=>{$('providerHelp').textContent=$('provider').value==='mock'?'Mock 压测：输出测试占位图，不发送供应商请求。':$('provider').value==='openai'?'点击出图会发送设计和参考图到 OpenAI，并产生 API 费用。开发阶段不限制次数，不会自动重试付费请求。':'演示模式读取已有样例图，用来测试上传、反馈与确认流程；不会真正生成或修改图片。';};
 $('projects').onchange=async()=>{try{await loadProject($('projects').value);say('');}catch(e){say(e.message);}};
 $('createForm').onsubmit=async event=>{
   event.preventDefault();
@@ -399,7 +400,7 @@ $('brushTool').onclick=()=>{annotationTool='brush';region=null;render();drawSele
 $('boxTool').onclick=()=>{annotationTool='box';render();drawSelection();};
 $('undoStroke').onclick=()=>{brushStrokes.pop();drawSelection();};
 $('clearSelection').onclick=resetRegion;$('referenceImage').onload=drawSelection;new ResizeObserver(drawSelection).observe($('imageWrap'));
-async function start(){try{config=await api('/api/config');promptTemplates=await api('/api/prompts');if(config.providers.includes('openai'))$('provider').add(new Option('OpenAI API · 付费出图','openai'));if(config.tripo_configured)api('/api/services/tripo/balance').then(wallet=>{tripoWallet=wallet;render();}).catch(e=>say(e.message));const list=await loadProjects();const remembered=localStorage.getItem('reference-project');if(list.length)await loadProject(list.find(p=>p.id===remembered)?.id||list[0].id);else render();}catch(e){say(e.message);}}
+async function start(){try{config=await api('/api/config');promptTemplates=await api('/api/prompts');if(config.load_test){$('provider').replaceChildren(new Option('Mock 压测 · 无真实 API 调用','mock'));}if(config.providers.includes('openai'))$('provider').add(new Option('OpenAI API · 付费出图','openai'));if(config.tripo_configured)api('/api/services/tripo/balance').then(wallet=>{tripoWallet=wallet;render();}).catch(e=>say(e.message));const list=await loadProjects();const remembered=localStorage.getItem('reference-project');if(list.length)await loadProject(list.find(p=>p.id===remembered)?.id||list[0].id);else render();}catch(e){say(e.message);}}
 setInterval(()=>{if(window.studioUser&&project)refresh().catch(e=>say('连接暂时中断；恢复后会继续读取任务状态。'));},2000);window.studioAuthReady.then(start);
 
 window.addEventListener('studio-session-ended',()=>{project=null;selected=null;for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();});

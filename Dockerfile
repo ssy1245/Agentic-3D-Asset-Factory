@@ -81,7 +81,7 @@ COPY scripts/prepare_model_preview.py scripts/export_blend.py scripts/import_ble
 # fixtures 默认为空，需要本地演示素材时另行只读挂载。
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --home-dir /home/app app \
-    && install -d -o app -g app /app/data /app/fixtures
+    && install -d -o app -g app /app/data /app/fixtures /app/load-test-data
 USER 10001:10001
 
 # 检查 Blender 在后台可启动，不加载或修改任何模型。

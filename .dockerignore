@@ -41,3 +41,7 @@ docs
 **/__pycache__
 **/*.pyc
 **/*.log
+
+# Isolated load-test databases and generated mock outputs.
+/load-test-data/
+/load-test-results/

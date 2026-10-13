@@ -80,7 +80,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             if op.get("model_format") == "fbx":
                 persist(op)
                 try:
-                    op["preview"] = await prepare_fbx_preview(path)
+                    op["preview"] = (tripo.preview(path) if getattr(tripo, "is_mock", False)
+                                     else await prepare_fbx_preview(path))
                 except Exception:  # noqa: BLE001 — original download is preserved
                     op["preview"] = {
                         "status": "unavailable",
@@ -503,7 +504,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
             raise HTTPException(409, "预览正在准备，请稍候")
         pending_previews.add(oid)
         try:
-            op["preview"] = await prepare_fbx_preview(path)
+            op["preview"] = (tripo.preview(path) if getattr(tripo, "is_mock", False)
+                             else await prepare_fbx_preview(path))
             # Reload after the worker so simultaneous approvals are preserved.
             with store.connect() as db:
                 current = store.operation(oid, db)
@@ -622,6 +624,8 @@ def attach_geometry(app, store, tripo, tasks, required_refs, revision, active):
     blend_export_lock = asyncio.Lock()
 
     async def blend_response(pid, models, name):
+        if getattr(tripo, "is_mock", False):
+            raise HTTPException(503, "压测模式不运行 Blender 原生导出；Mock 文件不代表真实资产。")
         async with blend_export_lock:
             try:
                 path = await build_blend(models, store.root / pid / "blend-exports", export_name(pid))

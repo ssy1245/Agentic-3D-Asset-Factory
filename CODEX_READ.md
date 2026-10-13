@@ -130,6 +130,10 @@ DemoProvider 使用本地 `fixtures/`，不调用图片生成服务，也不执�
 
 源代码中没有 `live_tripo_smoke.py`；忽略规则里出现的文件名不能证明文件存在。优先使用实际应用模块和测试，不要把一次性脚本变成默认启动入口。
 
+## Mock 压测边界
+
+`runtime.py` 定义严格的 `STUDIO_LOAD_TEST=0/1` 与真实调用拦截；`mock_providers.py` 提供无网络的图片、Checker、Tripo 和贴图 Mock。factory 在压测模式强制替换所有 provider，并默认写入独立 `load-test-data/`；正式 provider 不构造。3D 使用标记的占位立方体和本地 GLB，禁用 Blender 转换/原生导出；不把模拟结果当成实际资产质量。独立 `compose.loadtest.yaml` 不注入 `.env` Key，网络 internal，端口 8767；不要合并正式 Compose 或复用正式数据。准备方法和 Locust 范围见 `loadtests/README.md`。
+
 ## 测试和稳定性验证
 
 2026-10-05，本次接手整理使用现有 `.venv/bin/python -m pytest -q` 验证：**45 passed，7.22 秒**。它验证软件行为，不证明所有真实 API、资产质量或现场 demo 都稳定。README 中较早的测试记录保留其原始日期。
